@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.warnMethod = void 0;
-const warnMethod = (self, code, message, data = {}) => {
+export const warnMethod = (self, code, message, data = {}) => {
     if (self.file) {
         data.file = self.file;
     }
@@ -27,5 +24,4 @@ const warnMethod = (self, code, message, data = {}) => {
         self.emit('error', Object.assign(new Error(`${code}: ${message}`), data));
     }
 };
-exports.warnMethod = warnMethod;
 //# sourceMappingURL=warn-method.js.map

@@ -1,60 +1,21 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.WriteEntryTar = exports.WriteEntrySync = exports.WriteEntry = void 0;
-const fs_1 = __importDefault(require("fs"));
-const minipass_1 = require("minipass");
-const path_1 = __importDefault(require("path"));
-const header_js_1 = require("./header.js");
-const mode_fix_js_1 = require("./mode-fix.js");
-const normalize_windows_path_js_1 = require("./normalize-windows-path.js");
-const options_js_1 = require("./options.js");
-const pax_js_1 = require("./pax.js");
-const strip_absolute_path_js_1 = require("./strip-absolute-path.js");
-const strip_trailing_slashes_js_1 = require("./strip-trailing-slashes.js");
-const warn_method_js_1 = require("./warn-method.js");
-const winchars = __importStar(require("./winchars.js"));
+import fs from 'fs';
+import { Minipass } from 'minipass';
+import path from 'path';
+import { Header } from './header.js';
+import { modeFix } from './mode-fix.js';
+import { normalizeWindowsPath } from './normalize-windows-path.js';
+import { dealias } from './options.js';
+import { Pax } from './pax.js';
+import { stripAbsolutePath } from './strip-absolute-path.js';
+import { stripTrailingSlashes } from './strip-trailing-slashes.js';
+import { warnMethod } from './warn-method.js';
+import * as winchars from './winchars.js';
 const prefixPath = (path, prefix) => {
     if (!prefix) {
-        return (0, normalize_windows_path_js_1.normalizeWindowsPath)(path);
+        return normalizeWindowsPath(path);
     }
-    path = (0, normalize_windows_path_js_1.normalizeWindowsPath)(path).replace(/^\.(\/|$)/, '');
-    return (0, strip_trailing_slashes_js_1.stripTrailingSlashes)(prefix) + '/' + path;
+    path = normalizeWindowsPath(path).replace(/^\.(\/|$)/, '');
+    return stripTrailingSlashes(prefix) + '/' + path;
 };
 const maxReadSize = 16 * 1024 * 1024;
 const PROCESS = Symbol('process');
@@ -75,7 +36,7 @@ const MODE = Symbol('mode');
 const AWAITDRAIN = Symbol('awaitDrain');
 const ONDRAIN = Symbol('ondrain');
 const PREFIX = Symbol('prefix');
-class WriteEntry extends minipass_1.Minipass {
+export class WriteEntry extends Minipass {
     path;
     portable;
     myuid = (process.getuid && process.getuid()) || 0;
@@ -108,28 +69,28 @@ class WriteEntry extends minipass_1.Minipass {
     onWriteEntry;
     #hadError = false;
     constructor(p, opt_ = {}) {
-        const opt = (0, options_js_1.dealias)(opt_);
+        const opt = dealias(opt_);
         super();
-        this.path = (0, normalize_windows_path_js_1.normalizeWindowsPath)(p);
+        this.path = normalizeWindowsPath(p);
         // suppress atime, ctime, uid, gid, uname, gname
         this.portable = !!opt.portable;
         this.maxReadSize = opt.maxReadSize || maxReadSize;
         this.linkCache = opt.linkCache || new Map();
         this.statCache = opt.statCache || new Map();
         this.preservePaths = !!opt.preservePaths;
-        this.cwd = (0, normalize_windows_path_js_1.normalizeWindowsPath)(opt.cwd || process.cwd());
+        this.cwd = normalizeWindowsPath(opt.cwd || process.cwd());
         this.strict = !!opt.strict;
         this.noPax = !!opt.noPax;
         this.noMtime = !!opt.noMtime;
         this.mtime = opt.mtime;
-        this.prefix = opt.prefix ? (0, normalize_windows_path_js_1.normalizeWindowsPath)(opt.prefix) : undefined;
+        this.prefix = opt.prefix ? normalizeWindowsPath(opt.prefix) : undefined;
         this.onWriteEntry = opt.onWriteEntry;
         if (typeof opt.onwarn === 'function') {
             this.on('warn', opt.onwarn);
         }
         let pathWarn = false;
         if (!this.preservePaths) {
-            const [root, stripped] = (0, strip_absolute_path_js_1.stripAbsolutePath)(this.path);
+            const [root, stripped] = stripAbsolutePath(this.path);
             if (root && typeof stripped === 'string') {
                 this.path = stripped;
                 pathWarn = root;
@@ -142,7 +103,7 @@ class WriteEntry extends minipass_1.Minipass {
             this.path = winchars.decode(this.path.replaceAll(/\\/g, '/'));
             p = p.replaceAll(/\\/g, '/');
         }
-        this.absolute = (0, normalize_windows_path_js_1.normalizeWindowsPath)(opt.absolute || path_1.default.resolve(this.cwd, p));
+        this.absolute = normalizeWindowsPath(opt.absolute || path.resolve(this.cwd, p));
         if (this.path === '') {
             this.path = './';
         }
@@ -161,7 +122,7 @@ class WriteEntry extends minipass_1.Minipass {
         }
     }
     warn(code, message, data = {}) {
-        return (0, warn_method_js_1.warnMethod)(this, code, message, data);
+        return warnMethod(this, code, message, data);
     }
     emit(ev, ...data) {
         if (ev === 'error') {
@@ -170,7 +131,7 @@ class WriteEntry extends minipass_1.Minipass {
         return super.emit(ev, ...data);
     }
     [LSTAT]() {
-        fs_1.default.lstat(this.absolute, (er, stat) => {
+        fs.lstat(this.absolute, (er, stat) => {
             if (er) {
                 return this.emit('error', er);
             }
@@ -201,7 +162,7 @@ class WriteEntry extends minipass_1.Minipass {
         }
     }
     [MODE](mode) {
-        return (0, mode_fix_js_1.modeFix)(mode, this.type === 'Directory', this.portable);
+        return modeFix(mode, this.type === 'Directory', this.portable);
     }
     [PREFIX](path) {
         return prefixPath(path, this.prefix);
@@ -216,7 +177,7 @@ class WriteEntry extends minipass_1.Minipass {
             this.noMtime = true;
         }
         this.onWriteEntry?.(this);
-        this.header = new header_js_1.Header({
+        this.header = new Header({
             path: this[PREFIX](this.path),
             // only apply the prefix to hard links.
             linkpath: this.type === 'Link' && this.linkpath !== undefined ?
@@ -238,7 +199,7 @@ class WriteEntry extends minipass_1.Minipass {
             ctime: this.portable ? undefined : this.stat.ctime,
         });
         if (this.header.encode() && !this.noPax) {
-            super.write(new pax_js_1.Pax({
+            super.write(new Pax({
                 atime: this.portable ? undefined : this.header.atime,
                 ctime: this.portable ? undefined : this.header.ctime,
                 gid: this.portable ? undefined : this.header.gid,
@@ -277,7 +238,7 @@ class WriteEntry extends minipass_1.Minipass {
         this.end();
     }
     [SYMLINK]() {
-        fs_1.default.readlink(this.absolute, (er, linkpath) => {
+        fs.readlink(this.absolute, (er, linkpath) => {
             if (er) {
                 return this.emit('error', er);
             }
@@ -285,7 +246,7 @@ class WriteEntry extends minipass_1.Minipass {
         });
     }
     [ONREADLINK](linkpath) {
-        this.linkpath = (0, normalize_windows_path_js_1.normalizeWindowsPath)(linkpath);
+        this.linkpath = normalizeWindowsPath(linkpath);
         this[HEADER]();
         this.end();
     }
@@ -296,7 +257,7 @@ class WriteEntry extends minipass_1.Minipass {
         }
         /* c8 ignore stop */
         this.type = 'Link';
-        this.linkpath = (0, normalize_windows_path_js_1.normalizeWindowsPath)(path_1.default.relative(this.cwd, linkpath));
+        this.linkpath = normalizeWindowsPath(path.relative(this.cwd, linkpath));
         this.stat.size = 0;
         this[HEADER]();
         this.end();
@@ -322,7 +283,7 @@ class WriteEntry extends minipass_1.Minipass {
         this[OPENFILE]();
     }
     [OPENFILE]() {
-        fs_1.default.open(this.absolute, 'r', (er, fd) => {
+        fs.open(this.absolute, 'r', (er, fd) => {
             if (er) {
                 return this.emit('error', er);
             }
@@ -354,7 +315,7 @@ class WriteEntry extends minipass_1.Minipass {
         if (fd === undefined || buf === undefined) {
             throw new Error('cannot read file without first opening');
         }
-        fs_1.default.read(fd, buf, offset, length, pos, (er, bytesRead) => {
+        fs.read(fd, buf, offset, length, pos, (er, bytesRead) => {
             if (er) {
                 // ignoring the error from close(2) is a bad practice, but at
                 // this point we already have an error, don't need another one
@@ -367,7 +328,7 @@ class WriteEntry extends minipass_1.Minipass {
     [CLOSE](cb = () => { }) {
         /* c8 ignore stop */
         if (this.fd !== undefined)
-            fs_1.default.close(this.fd, cb);
+            fs.close(this.fd, cb);
     }
     [ONREAD](bytesRead) {
         if (bytesRead <= 0 && this.remain > 0) {
@@ -462,17 +423,16 @@ class WriteEntry extends minipass_1.Minipass {
         this[READ]();
     }
 }
-exports.WriteEntry = WriteEntry;
-class WriteEntrySync extends WriteEntry {
+export class WriteEntrySync extends WriteEntry {
     sync = true;
     [LSTAT]() {
-        this[ONLSTAT](fs_1.default.lstatSync(this.absolute));
+        this[ONLSTAT](fs.lstatSync(this.absolute));
     }
     [SYMLINK]() {
-        this[ONREADLINK](fs_1.default.readlinkSync(this.absolute));
+        this[ONREADLINK](fs.readlinkSync(this.absolute));
     }
     [OPENFILE]() {
-        this[ONOPENFILE](fs_1.default.openSync(this.absolute, 'r'));
+        this[ONOPENFILE](fs.openSync(this.absolute, 'r'));
     }
     [READ]() {
         let threw = true;
@@ -483,7 +443,7 @@ class WriteEntrySync extends WriteEntry {
                 throw new Error('fd and buf must be set in READ method');
             }
             /* c8 ignore stop */
-            const bytesRead = fs_1.default.readSync(fd, buf, offset, length, pos);
+            const bytesRead = fs.readSync(fd, buf, offset, length, pos);
             this[ONREAD](bytesRead);
             threw = false;
         }
@@ -505,12 +465,11 @@ class WriteEntrySync extends WriteEntry {
     [CLOSE](cb = () => { }) {
         /* c8 ignore stop */
         if (this.fd !== undefined)
-            fs_1.default.closeSync(this.fd);
+            fs.closeSync(this.fd);
         cb();
     }
 }
-exports.WriteEntrySync = WriteEntrySync;
-class WriteEntryTar extends minipass_1.Minipass {
+export class WriteEntryTar extends Minipass {
     blockLen = 0;
     blockRemain = 0;
     buf = 0;
@@ -539,10 +498,10 @@ class WriteEntryTar extends minipass_1.Minipass {
     size;
     onWriteEntry;
     warn(code, message, data = {}) {
-        return (0, warn_method_js_1.warnMethod)(this, code, message, data);
+        return warnMethod(this, code, message, data);
     }
     constructor(readEntry, opt_ = {}) {
-        const opt = (0, options_js_1.dealias)(opt_);
+        const opt = dealias(opt_);
         super();
         this.preservePaths = !!opt.preservePaths;
         this.portable = !!opt.portable;
@@ -562,7 +521,7 @@ class WriteEntryTar extends minipass_1.Minipass {
             this.noMtime = true;
         }
         this.prefix = opt.prefix;
-        this.path = (0, normalize_windows_path_js_1.normalizeWindowsPath)(readEntry.path);
+        this.path = normalizeWindowsPath(readEntry.path);
         this.mode =
             readEntry.mode !== undefined ? this[MODE](readEntry.mode) : undefined;
         this.uid = this.portable ? undefined : readEntry.uid;
@@ -575,14 +534,14 @@ class WriteEntryTar extends minipass_1.Minipass {
         this.ctime = this.portable ? undefined : readEntry.ctime;
         this.linkpath =
             readEntry.linkpath !== undefined ?
-                (0, normalize_windows_path_js_1.normalizeWindowsPath)(readEntry.linkpath)
+                normalizeWindowsPath(readEntry.linkpath)
                 : undefined;
         if (typeof opt.onwarn === 'function') {
             this.on('warn', opt.onwarn);
         }
         let pathWarn = false;
         if (!this.preservePaths) {
-            const [root, stripped] = (0, strip_absolute_path_js_1.stripAbsolutePath)(this.path);
+            const [root, stripped] = stripAbsolutePath(this.path);
             if (root && typeof stripped === 'string') {
                 this.path = stripped;
                 pathWarn = root;
@@ -591,7 +550,7 @@ class WriteEntryTar extends minipass_1.Minipass {
         this.remain = readEntry.size;
         this.blockRemain = readEntry.startBlockSize;
         this.onWriteEntry?.(this);
-        this.header = new header_js_1.Header({
+        this.header = new Header({
             path: this[PREFIX](this.path),
             linkpath: this.type === 'Link' && this.linkpath !== undefined ?
                 this[PREFIX](this.linkpath)
@@ -615,7 +574,7 @@ class WriteEntryTar extends minipass_1.Minipass {
             });
         }
         if (this.header.encode() && !this.noPax) {
-            super.write(new pax_js_1.Pax({
+            super.write(new Pax({
                 atime: this.portable ? undefined : this.atime,
                 ctime: this.portable ? undefined : this.ctime,
                 gid: this.portable ? undefined : this.gid,
@@ -644,7 +603,7 @@ class WriteEntryTar extends minipass_1.Minipass {
         return prefixPath(path, this.prefix);
     }
     [MODE](mode) {
-        return (0, mode_fix_js_1.modeFix)(mode, this.type === 'Directory', this.portable);
+        return modeFix(mode, this.type === 'Directory', this.portable);
     }
     write(chunk, encoding, cb) {
         /* c8 ignore start - just junk to comply with NodeJS.WritableStream */
@@ -690,7 +649,6 @@ class WriteEntryTar extends minipass_1.Minipass {
         return this;
     }
 }
-exports.WriteEntryTar = WriteEntryTar;
 const getType = (stat) => stat.isFile() ? 'File'
     : stat.isDirectory() ? 'Directory'
         : stat.isSymbolicLink() ? 'SymbolicLink'
