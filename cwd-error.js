@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.CwdError = void 0;
-class CwdError extends Error {
+export class CwdError extends Error {
     path;
     code;
     syscall = 'chdir';
@@ -14,5 +11,4 @@ class CwdError extends Error {
         return 'CwdError';
     }
 }
-exports.CwdError = CwdError;
 //# sourceMappingURL=cwd-error.js.map

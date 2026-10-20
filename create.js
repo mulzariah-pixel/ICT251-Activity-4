@@ -1,25 +1,19 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.create = void 0;
-const fs_minipass_1 = require("@isaacs/fs-minipass");
-const node_path_1 = __importDefault(require("node:path"));
-const list_js_1 = require("./list.js");
-const make_command_js_1 = require("./make-command.js");
-const pack_js_1 = require("./pack.js");
+import { WriteStream, WriteStreamSync } from '@isaacs/fs-minipass';
+import path from 'node:path';
+import { list } from './list.js';
+import { makeCommand } from './make-command.js';
+import { Pack, PackSync } from './pack.js';
 const createFileSync = (opt, files) => {
-    const p = new pack_js_1.PackSync(opt);
-    const stream = new fs_minipass_1.WriteStreamSync(opt.file, {
+    const p = new PackSync(opt);
+    const stream = new WriteStreamSync(opt.file, {
         mode: opt.mode || 0o666,
     });
     p.pipe(stream);
     addFilesSync(p, files);
 };
 const createFile = (opt, files) => {
-    const p = new pack_js_1.Pack(opt);
-    const stream = new fs_minipass_1.WriteStream(opt.file, {
+    const p = new Pack(opt);
+    const stream = new WriteStream(opt.file, {
         mode: opt.mode || 0o666,
     });
     p.pipe(stream);
@@ -34,8 +28,8 @@ const createFile = (opt, files) => {
 const addFilesSync = (p, files) => {
     files.forEach(file => {
         if (file.charAt(0) === '@') {
-            (0, list_js_1.list)({
-                file: node_path_1.default.resolve(p.cwd, file.slice(1)),
+            list({
+                file: path.resolve(p.cwd, file.slice(1)),
                 sync: true,
                 noResume: true,
                 onReadEntry: entry => p.add(entry),
@@ -50,8 +44,8 @@ const addFilesSync = (p, files) => {
 const addFilesAsync = async (p, files) => {
     for (const file of files) {
         if (file.charAt(0) === '@') {
-            await (0, list_js_1.list)({
-                file: node_path_1.default.resolve(String(p.cwd), file.slice(1)),
+            await list({
+                file: path.resolve(String(p.cwd), file.slice(1)),
                 noResume: true,
                 onReadEntry: entry => {
                     p.add(entry);
@@ -65,16 +59,16 @@ const addFilesAsync = async (p, files) => {
     p.end();
 };
 const createSync = (opt, files) => {
-    const p = new pack_js_1.PackSync(opt);
+    const p = new PackSync(opt);
     addFilesSync(p, files);
     return p;
 };
 const createAsync = (opt, files) => {
-    const p = new pack_js_1.Pack(opt);
+    const p = new Pack(opt);
     addFilesAsync(p, files).catch(er => p.emit('error', er));
     return p;
 };
-exports.create = (0, make_command_js_1.makeCommand)(createFileSync, createFile, createSync, createAsync, (_opt, files) => {
+export const create = makeCommand(createFileSync, createFile, createSync, createAsync, (_opt, files) => {
     if (!files?.length) {
         throw new TypeError('no paths specified to add to archive');
     }
