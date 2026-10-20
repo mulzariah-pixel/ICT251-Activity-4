@@ -1,392 +1,64 @@
-var chownr = require('chownr')
-var tar = require('tar-stream')
-var pump = require('pump')
-var mkdirp = require('mkdirp-classic')
-var fs = require('fs')
-var path = require('path')
-var os = require('os')
-
-var win32 = os.platform() === 'win32'
-
-var noop = function () {}
-
-var echo = function (name) {
-  return name
-}
-
-var normalize = !win32 ? echo : function (name) {
-  return name.replace(/\\/g, '/').replace(/[:?<>|]/g, '_')
-}
-
-var statAll = function (fs, stat, cwd, ignore, entries, sort) {
-  var queue = entries || ['.']
-
-  for (var i = 0; i < queue.length; i++) { // do not pack entries outside cwd
-    if (!inCwd(path.resolve(cwd, queue[i]), cwd)) throw new Error(queue[i] + ' is not a valid path')
-  }
-
-  return function loop (callback) {
-    if (!queue.length) return callback()
-    var next = queue.shift()
-    var nextAbs = path.join(cwd, next)
-
-    stat.call(fs, nextAbs, function (err, stat) {
-      if (err) return callback(err)
-
-      if (!stat.isDirectory()) return callback(null, next, stat)
-
-      fs.readdir(nextAbs, function (err, files) {
-        if (err) return callback(err)
-
-        if (sort) files.sort()
-        for (var i = 0; i < files.length; i++) {
-          if (!ignore(path.join(cwd, next, files[i]))) queue.push(path.join(next, files[i]))
-        }
-
-        callback(null, next, stat)
-      })
-    })
-  }
-}
-
-var strip = function (map, level) {
-  return function (header) {
-    header.name = header.name.split('/').slice(level).join('/')
-
-    var linkname = header.linkname
-    if (linkname && (header.type === 'link' || path.isAbsolute(linkname))) {
-      header.linkname = linkname.split('/').slice(level).join('/')
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-
-    return map(header)
-  }
-}
-
-exports.pack = function (cwd, opts) {
-  if (!cwd) cwd = '.'
-  if (!opts) opts = {}
-
-  var xfs = opts.fs || fs
-  var ignore = opts.ignore || opts.filter || noop
-  var map = opts.map || noop
-  var mapStream = opts.mapStream || echo
-  var statNext = statAll(xfs, opts.dereference ? xfs.stat : xfs.lstat, cwd, ignore, opts.entries, opts.sort)
-  var strict = opts.strict !== false
-  var umask = typeof opts.umask === 'number' ? ~opts.umask : ~processUmask()
-  var dmode = typeof opts.dmode === 'number' ? opts.dmode : 0
-  var fmode = typeof opts.fmode === 'number' ? opts.fmode : 0
-  var pack = opts.pack || tar.pack()
-  var finish = opts.finish || noop
-
-  if (opts.strip) map = strip(map, opts.strip)
-
-  if (opts.readable) {
-    dmode |= parseInt(555, 8)
-    fmode |= parseInt(444, 8)
-  }
-  if (opts.writable) {
-    dmode |= parseInt(333, 8)
-    fmode |= parseInt(222, 8)
-  }
-
-  var onsymlink = function (filename, header) {
-    xfs.readlink(path.join(cwd, filename), function (err, linkname) {
-      if (err) return pack.destroy(err)
-      header.linkname = normalize(linkname)
-      pack.entry(header, onnextentry)
-    })
-  }
-
-  var onstat = function (err, filename, stat) {
-    if (err) return pack.destroy(err)
-    if (!filename) {
-      if (opts.finalize !== false) pack.finalize()
-      return finish(pack)
-    }
-
-    if (stat.isSocket()) return onnextentry() // tar does not support sockets...
-
-    var header = {
-      name: normalize(filename),
-      mode: (stat.mode | (stat.isDirectory() ? dmode : fmode)) & umask,
-      mtime: stat.mtime,
-      size: stat.size,
-      type: 'file',
-      uid: stat.uid,
-      gid: stat.gid
-    }
-
-    if (stat.isDirectory()) {
-      header.size = 0
-      header.type = 'directory'
-      header = map(header) || header
-      return pack.entry(header, onnextentry)
-    }
-
-    if (stat.isSymbolicLink()) {
-      header.size = 0
-      header.type = 'symlink'
-      header = map(header) || header
-      return onsymlink(filename, header)
-    }
-
-    // TODO: add fifo etc...
-
-    header = map(header) || header
-
-    if (!stat.isFile()) {
-      if (strict) return pack.destroy(new Error('unsupported type for ' + filename))
-      return onnextentry()
-    }
-
-    var entry = pack.entry(header, onnextentry)
-    if (!entry) return
-
-    var rs = mapStream(xfs.createReadStream(path.join(cwd, filename), { start: 0, end: header.size > 0 ? header.size - 1 : header.size }), header)
-
-    rs.on('error', function (err) { // always forward errors on destroy
-      entry.destroy(err)
-    })
-
-    pump(rs, entry)
-  }
-
-  var onnextentry = function (err) {
-    if (err) return pack.destroy(err)
-    statNext(onstat)
-  }
-
-  onnextentry()
-
-  return pack
-}
-
-var head = function (list) {
-  return list.length ? list[list.length - 1] : null
-}
-
-var processGetuid = function () {
-  return process.getuid ? process.getuid() : -1
-}
-
-var processUmask = function () {
-  return process.umask ? process.umask() : 0
-}
-
-exports.extract = function (cwd, opts) {
-  if (!cwd) cwd = '.'
-  if (!opts) opts = {}
-
-  var xfs = opts.fs || fs
-  var ignore = opts.ignore || opts.filter || noop
-  var map = opts.map || noop
-  var mapStream = opts.mapStream || echo
-  var own = opts.chown !== false && !win32 && processGetuid() === 0
-  var extract = opts.extract || tar.extract()
-  var stack = []
-  var now = new Date()
-  var umask = typeof opts.umask === 'number' ? ~opts.umask : ~processUmask()
-  var dmode = typeof opts.dmode === 'number' ? opts.dmode : 0
-  var fmode = typeof opts.fmode === 'number' ? opts.fmode : 0
-  var strict = opts.strict !== false
-
-  if (opts.strip) map = strip(map, opts.strip)
-
-  if (opts.readable) {
-    dmode |= parseInt(555, 8)
-    fmode |= parseInt(444, 8)
-  }
-  if (opts.writable) {
-    dmode |= parseInt(333, 8)
-    fmode |= parseInt(222, 8)
-  }
-
-  var utimesParent = function (name, cb) { // we just set the mtime on the parent dir again everytime we write an entry
-    var top
-    while ((top = head(stack)) && name.slice(0, top[0].length) !== top[0]) stack.pop()
-    if (!top) return cb()
-    xfs.utimes(top[0], now, top[1], cb)
-  }
-
-  var utimes = function (name, header, cb) {
-    if (opts.utimes === false) return cb()
-
-    if (header.type === 'directory') return xfs.utimes(name, now, header.mtime, cb)
-    if (header.type === 'symlink') return utimesParent(name, cb) // TODO: how to set mtime on link?
-
-    xfs.utimes(name, now, header.mtime, function (err) {
-      if (err) return cb(err)
-      utimesParent(name, cb)
-    })
-  }
-
-  var chperm = function (name, header, cb) {
-    var link = header.type === 'symlink'
-
-    /* eslint-disable node/no-deprecated-api */
-    var chmod = link ? xfs.lchmod : xfs.chmod
-    var chown = link ? xfs.lchown : xfs.chown
-    /* eslint-enable node/no-deprecated-api */
-
-    if (!chmod) return cb()
-
-    var mode = (header.mode | (header.type === 'directory' ? dmode : fmode)) & umask & parseInt(777, 8) // never extract setuid/setgid/sticky bits
-
-    if (chown && own) chown.call(xfs, name, header.uid, header.gid, onchown)
-    else onchown(null)
-
-    function onchown (err) {
-      if (err) return cb(err)
-      if (!chmod) return cb()
-      chmod.call(xfs, name, mode, cb)
-    }
-  }
-
-  extract.on('entry', function (header, stream, next) {
-    header = map(header) || header
-    header.name = normalize(header.name)
-    var name = path.join(cwd, path.join('/', header.name))
-
-    if (ignore(name, header)) {
-      stream.resume()
-      return next()
-    }
-
-    var stat = function (err) {
-      if (err) return next(err)
-      if (path.join(name, '.') === path.join(cwd, '.')) return next() // do not touch the extraction root itself
-      utimes(name, header, function (err) {
-        if (err) return next(err)
-        if (win32) return next()
-        chperm(name, header, next)
-      })
-    }
-
-    var onsymlink = function () {
-      if (win32) return next() // skip symlinks on win for now before it can be tested
-      xfs.unlink(name, function () {
-        var dst = path.resolve(path.dirname(name), header.linkname)
-        if (!inCwd(dst, cwd)) return next(new Error(name + ' is not a valid symlink'))
-
-        validateNotSymlink(xfs, dst, path.resolve(cwd), function (err, valid) {
-          if (err) return next(err)
-          if (!valid) return next(new Error(name + ' is not a valid symlink'))
-          xfs.symlink(header.linkname, name, stat)
-        })
-      })
-    }
-
-    var onlink = function () {
-      if (win32) return next() // skip links on win for now before it can be tested
-      xfs.unlink(name, function () {
-        var srcpath = path.join(cwd, path.join('/', header.linkname))
-
-        xfs.realpath(srcpath, function (err, dst) {
-          if (err || !inCwd(dst, cwd)) return next(new Error(name + ' is not a valid hardlink'))
-
-          xfs.link(dst, name, function (err) {
-            if (err && err.code === 'EPERM' && opts.hardlinkAsFilesFallback) {
-              stream = xfs.createReadStream(srcpath)
-              return onfile()
-            }
-
-            stat(err)
-          })
-        })
-      })
-    }
-
-    var onfile = function () {
-      xfs.lstat(name, function (err, st) {
-        if (!err && st.isSymbolicLink()) return xfs.unlink(name, onwrite) // never write through an existing symlink
-        onwrite()
-      })
-
-      function onwrite (err) {
-        if (err) return next(err)
-
-        var ws = xfs.createWriteStream(name)
-        var rs = mapStream(stream, header)
-
-        ws.on('error', function (err) { // always forward errors on destroy
-          rs.destroy(err)
-        })
-
-        pump(rs, ws, function (err) {
-          if (err) return next(err)
-          ws.on('close', stat)
-        })
-      }
-    }
-
-    if (header.type === 'directory') {
-      stack.push([name, header.mtime])
-      return mkdirfix(name, {
-        fs: xfs, own: own, uid: header.uid, gid: header.gid
-      }, stat)
-    }
-
-    var dir = path.dirname(name)
-
-    validate(xfs, dir, path.join(cwd, '.'), function (err, valid) {
-      if (err) return next(err)
-      if (!valid) return next(new Error(dir + ' is not a valid path'))
-
-      mkdirfix(dir, {
-        fs: xfs, own: own, uid: header.uid, gid: header.gid
-      }, function (err) {
-        if (err) return next(err)
-
-        switch (header.type) {
-          case 'file': return onfile()
-          case 'link': return onlink()
-          case 'symlink': return onsymlink()
-        }
-
-        if (strict) return next(new Error('unsupported type for ' + name + ' (' + header.type + ')'))
-
-        stream.resume()
-        next()
-      })
-    })
-  })
-
-  if (opts.finish) extract.on('finish', opts.finish)
-
-  return extract
-}
-
-function validate (fs, name, root, cb) {
-  if (name === root) return cb(null, true)
-  fs.lstat(name, function (err, st) {
-    if (err && err.code !== 'ENOENT') return cb(err)
-    if (err || st.isDirectory()) return validate(fs, path.join(name, '..'), root, cb)
-    cb(null, false)
-  })
-}
-
-function validateNotSymlink (fs, name, root, cb) {
-  if (name === root) return cb(null, true)
-  if (!name.startsWith(root + path.sep)) return cb(null, false)
-
-  fs.lstat(name, function (err, st) {
-    if (err && err.code !== 'ENOENT' && err.code !== 'EPERM') return cb(err)
-    if (err || !st.isSymbolicLink()) return validateNotSymlink(fs, path.join(name, '..'), root, cb)
-    cb(null, false)
-  })
-}
-
-function mkdirfix (name, opts, cb) {
-  mkdirp(name, { fs: opts.fs }, function (err, made) {
-    if (!err && made && opts.own) {
-      chownr(made, opts.uid, opts.gid, cb)
-    } else {
-      cb(err)
-    }
-  })
-}
-
-function inCwd (dst, cwd) {
-  cwd = path.resolve(cwd)
-  return cwd === dst || dst.startsWith(cwd + path.sep)
-}
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.u = exports.types = exports.r = exports.t = exports.x = exports.c = void 0;
+__exportStar(require("./create.js"), exports);
+var create_js_1 = require("./create.js");
+Object.defineProperty(exports, "c", { enumerable: true, get: function () { return create_js_1.create; } });
+__exportStar(require("./extract.js"), exports);
+var extract_js_1 = require("./extract.js");
+Object.defineProperty(exports, "x", { enumerable: true, get: function () { return extract_js_1.extract; } });
+__exportStar(require("./header.js"), exports);
+__exportStar(require("./list.js"), exports);
+var list_js_1 = require("./list.js");
+Object.defineProperty(exports, "t", { enumerable: true, get: function () { return list_js_1.list; } });
+// classes
+__exportStar(require("./pack.js"), exports);
+__exportStar(require("./parse.js"), exports);
+__exportStar(require("./pax.js"), exports);
+__exportStar(require("./read-entry.js"), exports);
+__exportStar(require("./replace.js"), exports);
+var replace_js_1 = require("./replace.js");
+Object.defineProperty(exports, "r", { enumerable: true, get: function () { return replace_js_1.replace; } });
+exports.types = __importStar(require("./types.js"));
+__exportStar(require("./unpack.js"), exports);
+__exportStar(require("./update.js"), exports);
+var update_js_1 = require("./update.js");
+Object.defineProperty(exports, "u", { enumerable: true, get: function () { return update_js_1.update; } });
+__exportStar(require("./write-entry.js"), exports);
+//# sourceMappingURL=index.js.map
