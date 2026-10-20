@@ -1,48 +1,12 @@
-"use strict";
 // parse a 512-byte header block to a data object, or vice-versa
 // encode returns `true` if a pax extended header is needed, because
 // the data could not be faithfully encoded in a simple header.
 // (Also, check header.needPax to see if it needs a pax header.)
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Header = void 0;
-const node_path_1 = require("node:path");
-const large = __importStar(require("./large-numbers.js"));
-const types = __importStar(require("./types.js"));
+import { posix as pathModule } from 'node:path';
+import * as large from './large-numbers.js';
+import * as types from './types.js';
 const notNegative = (n) => n === undefined || n < 0 ? undefined : n;
-class Header {
+export class Header {
     cksumValid = false;
     needPax = false;
     nullBlock = false;
@@ -272,20 +236,19 @@ class Header {
         }
     }
 }
-exports.Header = Header;
 const splitPrefix = (p, prefixSize) => {
     const pathSize = 100;
     let pp = p;
     let prefix = '';
     let ret = undefined;
-    const root = node_path_1.posix.parse(p).root || '.';
+    const root = pathModule.parse(p).root || '.';
     if (Buffer.byteLength(pp) < pathSize) {
         ret = [pp, prefix, false];
     }
     else {
         // first set prefix to the dir, and path to the base
-        prefix = node_path_1.posix.dirname(pp);
-        pp = node_path_1.posix.basename(pp);
+        prefix = pathModule.dirname(pp);
+        pp = pathModule.basename(pp);
         do {
             if (Buffer.byteLength(pp) <= pathSize &&
                 Buffer.byteLength(prefix) <= prefixSize) {
@@ -299,8 +262,8 @@ const splitPrefix = (p, prefixSize) => {
             }
             else {
                 // make path take a bit from prefix
-                pp = node_path_1.posix.join(node_path_1.posix.basename(prefix), pp);
-                prefix = node_path_1.posix.dirname(prefix);
+                pp = pathModule.join(pathModule.basename(prefix), pp);
+                prefix = pathModule.dirname(prefix);
             }
         } while (prefix !== root && ret === undefined);
         // at this point, found no resolution, just truncate

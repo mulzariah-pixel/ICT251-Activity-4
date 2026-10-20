@@ -1,9 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Pax = void 0;
-const node_path_1 = require("node:path");
-const header_js_1 = require("./header.js");
-class Pax {
+import { basename } from 'node:path';
+import { Header } from './header.js';
+export class Pax {
     atime;
     mtime;
     ctime;
@@ -53,12 +50,12 @@ class Pax {
         for (let i = 0; i < 512; i++) {
             buf[i] = 0;
         }
-        new header_js_1.Header({
+        new Header({
             // XXX split the path
             // then the path should be PaxHeader + basename, but less than 99,
             // prepend with the dirname
             /* c8 ignore start */
-            path: ('PaxHeader/' + (0, node_path_1.basename)(this.path ?? '')).slice(0, 99),
+            path: ('PaxHeader/' + basename(this.path ?? '')).slice(0, 99),
             /* c8 ignore stop */
             mode: this.mode || 0o644,
             uid: this.uid,
@@ -127,7 +124,6 @@ class Pax {
         return new Pax(merge(parseKV(str), ex), g);
     }
 }
-exports.Pax = Pax;
 const merge = (a, b) => b ? Object.assign({}, b, a) : a;
 const parseKV = (str) => str
     .replace(/\n$/, '')

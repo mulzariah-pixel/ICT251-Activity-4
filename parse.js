@@ -1,4 +1,3 @@
-"use strict";
 // this[BUFFER] is the remainder of a chunk if we're waiting for
 // the full 512 bytes of a header to come in.  We will Buffer.concat()
 // it to the next write(), which is a mem copy, but a small one.
@@ -18,14 +17,12 @@
 // and waiting for 'end' on the entry at READENTRY
 //
 // ignored entries get .resume() called on them straight away
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Parser = void 0;
-const events_1 = require("events");
-const minizlib_1 = require("minizlib");
-const header_js_1 = require("./header.js");
-const pax_js_1 = require("./pax.js");
-const read_entry_js_1 = require("./read-entry.js");
-const warn_method_js_1 = require("./warn-method.js");
+import { EventEmitter as EE } from 'events';
+import { BrotliDecompress, Unzip, ZstdDecompress } from 'minizlib';
+import { Header } from './header.js';
+import { Pax } from './pax.js';
+import { ReadEntry } from './read-entry.js';
+import { warnMethod } from './warn-method.js';
 const maxMetaEntrySize = 1024 * 1024;
 const gzipHeader = Buffer.from([0x1f, 0x8b]);
 const zstdHeader = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
@@ -65,7 +62,7 @@ const COMPRESSEDBYTESREAD = Symbol('compressedBytesRead');
 const DECOMPRESSEDBYTESREAD = Symbol('decompressedBytesRead');
 const CHECKDECOMPRESSIONRATIO = Symbol('checkDecompressionRatio');
 const noop = () => true;
-class Parser extends events_1.EventEmitter {
+export class Parser extends EE {
     file;
     strict;
     maxMetaEntrySize;
@@ -151,7 +148,7 @@ class Parser extends events_1.EventEmitter {
         }
     }
     warn(code, message, data = {}) {
-        (0, warn_method_js_1.warnMethod)(this, code, message, data);
+        warnMethod(this, code, message, data);
     }
     [CONSUMEHEADER](chunk, position) {
         if (this[SAW_VALID_ENTRY] === undefined) {
@@ -159,7 +156,7 @@ class Parser extends events_1.EventEmitter {
         }
         let header;
         try {
-            header = new header_js_1.Header(chunk, position, this[EX], this[GEX]);
+            header = new Header(chunk, position, this[EX], this[GEX]);
         }
         catch (er) {
             return this.warn('TAR_ENTRY_INVALID', er);
@@ -201,7 +198,7 @@ class Parser extends events_1.EventEmitter {
                     });
                 }
                 else {
-                    const entry = (this[WRITEENTRY] = new read_entry_js_1.ReadEntry(header, this[EX], this[GEX]));
+                    const entry = (this[WRITEENTRY] = new ReadEntry(header, this[EX], this[GEX]));
                     // we do this for meta & ignored entries as well, because they
                     // are still valid tar, or else we wouldn't know to ignore them
                     if (!this[SAW_VALID_ENTRY]) {
@@ -348,10 +345,10 @@ class Parser extends events_1.EventEmitter {
         switch (entry.type) {
             case 'ExtendedHeader':
             case 'OldExtendedHeader':
-                this[EX] = pax_js_1.Pax.parse(this[META], this[EX], false);
+                this[EX] = Pax.parse(this[META], this[EX], false);
                 break;
             case 'GlobalExtendedHeader':
-                this[GEX] = pax_js_1.Pax.parse(this[META], this[GEX], true);
+                this[GEX] = Pax.parse(this[META], this[GEX], true);
                 break;
             case 'NextFileHasLongPath':
             case 'OldGnuLongPath': {
@@ -467,7 +464,7 @@ class Parser extends events_1.EventEmitter {
                     // if it's tar, it's pretty reliably not brotli, chances of
                     // that happening are astronomical.
                     try {
-                        new header_js_1.Header(chunk.subarray(0, 512));
+                        new Header(chunk.subarray(0, 512));
                         this.brotli = false;
                     }
                     catch (_) {
@@ -480,9 +477,9 @@ class Parser extends events_1.EventEmitter {
                 const ended = this[ENDED];
                 this[ENDED] = false;
                 this[UNZIP] =
-                    this[UNZIP] === undefined ? new minizlib_1.Unzip({})
-                        : isZstd ? new minizlib_1.ZstdDecompress({})
-                            : new minizlib_1.BrotliDecompress({});
+                    this[UNZIP] === undefined ? new Unzip({})
+                        : isZstd ? new ZstdDecompress({})
+                            : new BrotliDecompress({});
                 this[UNZIP].on('data', chunk => {
                     if (this[CHECKDECOMPRESSIONRATIO](chunk)) {
                         this[CONSUMECHUNK](chunk);
@@ -651,5 +648,4 @@ class Parser extends events_1.EventEmitter {
         return this;
     }
 }
-exports.Parser = Parser;
 //# sourceMappingURL=parse.js.map

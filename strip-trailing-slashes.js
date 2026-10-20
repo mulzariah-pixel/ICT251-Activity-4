@@ -1,11 +1,8 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.stripTrailingSlashes = void 0;
 // warning: extremely hot code path.
 // This has been meticulously optimized for use
 // within npm install on large package trees.
 // Do not edit without careful benchmarking.
-const stripTrailingSlashes = (str) => {
+export const stripTrailingSlashes = (str) => {
     let i = str.length - 1;
     let slashesStart = -1;
     while (i > -1 && str.charAt(i) === '/') {
@@ -14,5 +11,4 @@ const stripTrailingSlashes = (str) => {
     }
     return slashesStart === -1 ? str : str.slice(0, slashesStart);
 };
-exports.stripTrailingSlashes = stripTrailingSlashes;
 //# sourceMappingURL=strip-trailing-slashes.js.map

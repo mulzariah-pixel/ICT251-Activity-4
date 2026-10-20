@@ -1,6 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeUnicode = void 0;
 // warning: extremely hot code path.
 // This has been meticulously optimized for use
 // within npm install on large package trees.
@@ -9,7 +6,7 @@ const normalizeCache = Object.create(null);
 // Limit the size of this. Very low-sophistication LRU cache
 const MAX = 10000;
 const cache = new Set();
-const normalizeUnicode = (s) => {
+export const normalizeUnicode = (s) => {
     if (!cache.has(s)) {
         // shake out identical accents and ligatures
         normalizeCache[s] = s
@@ -34,5 +31,4 @@ const normalizeUnicode = (s) => {
     }
     return ret;
 };
-exports.normalizeUnicode = normalizeUnicode;
 //# sourceMappingURL=normalize-unicode.js.map

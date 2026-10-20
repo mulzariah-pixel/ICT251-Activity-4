@@ -1,4 +1,3 @@
-"use strict";
 // A readable tar stream creator
 // Technically, this is a transform stream that you write paths into,
 // and tar format comes out of.
@@ -7,47 +6,9 @@
 // do `new Pack(opt).add('files').add('dir').end().pipe(output)
 // You could also do something like:
 // streamOfPaths().pipe(new Pack()).pipe(new fs.WriteStream('out.tar'))
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PackSync = exports.Pack = exports.PackJob = void 0;
-const fs_1 = __importDefault(require("fs"));
-const write_entry_js_1 = require("./write-entry.js");
-class PackJob {
+import fs from 'fs';
+import { WriteEntry, WriteEntrySync, WriteEntryTar, } from './write-entry.js';
+export class PackJob {
     path;
     absolute;
     entry;
@@ -62,11 +23,10 @@ class PackJob {
         this.absolute = absolute;
     }
 }
-exports.PackJob = PackJob;
-const minipass_1 = require("minipass");
-const zlib = __importStar(require("minizlib"));
-const yallist_1 = require("yallist");
-const warn_method_js_1 = require("./warn-method.js");
+import { Minipass } from 'minipass';
+import * as zlib from 'minizlib';
+import { Yallist } from 'yallist';
+import { warnMethod } from './warn-method.js';
 const EOF = Buffer.alloc(1024);
 const ONSTAT = Symbol('onStat');
 const ENDED = Symbol('ended');
@@ -89,9 +49,9 @@ const ENTRYOPT = Symbol('entryOpt');
 const WRITEENTRYCLASS = Symbol('writeEntryClass');
 const WRITE = Symbol('write');
 const ONDRAIN = Symbol('ondrain');
-const path_1 = __importDefault(require("path"));
-const normalize_windows_path_js_1 = require("./normalize-windows-path.js");
-class Pack extends minipass_1.Minipass {
+import path from 'path';
+import { normalizeWindowsPath } from './normalize-windows-path.js';
+export class Pack extends Minipass {
     sync = false;
     opt;
     cwd;
@@ -136,12 +96,12 @@ class Pack extends minipass_1.Minipass {
         this.preservePaths = !!opt.preservePaths;
         this.strict = !!opt.strict;
         this.noPax = !!opt.noPax;
-        this.prefix = (0, normalize_windows_path_js_1.normalizeWindowsPath)(opt.prefix || '');
+        this.prefix = normalizeWindowsPath(opt.prefix || '');
         this.linkCache = opt.linkCache || new Map();
         this.statCache = opt.statCache || new Map();
         this.readdirCache = opt.readdirCache || new Map();
         this.onWriteEntry = opt.onWriteEntry;
-        this[WRITEENTRYCLASS] = write_entry_js_1.WriteEntry;
+        this[WRITEENTRYCLASS] = WriteEntry;
         if (typeof opt.onwarn === 'function') {
             this.on('warn', opt.onwarn);
         }
@@ -191,7 +151,7 @@ class Pack extends minipass_1.Minipass {
             this.mtime = opt.mtime;
         this.filter =
             typeof opt.filter === 'function' ? opt.filter : () => true;
-        this[QUEUE] = new yallist_1.Yallist();
+        this[QUEUE] = new Yallist();
         this[JOBS] = 0;
         this.jobs = Number(opt.jobs) || 4;
         this[PROCESSING] = false;
@@ -238,14 +198,14 @@ class Pack extends minipass_1.Minipass {
         return this.flowing;
     }
     [ADDTARENTRY](p) {
-        const absolute = (0, normalize_windows_path_js_1.normalizeWindowsPath)(path_1.default.resolve(this.cwd, p.path));
+        const absolute = normalizeWindowsPath(path.resolve(this.cwd, p.path));
         // in this case, we don't have to wait for the stat
         if (!this.filter(p.path, p)) {
             p.resume();
         }
         else {
             const job = new PackJob(p.path, absolute);
-            job.entry = new write_entry_js_1.WriteEntryTar(p, this[ENTRYOPT](job));
+            job.entry = new WriteEntryTar(p, this[ENTRYOPT](job));
             job.entry.on('end', () => this[JOBDONE](job));
             this[JOBS] += 1;
             this[QUEUE].push(job);
@@ -253,7 +213,7 @@ class Pack extends minipass_1.Minipass {
         this[PROCESS]();
     }
     [ADDFSENTRY](p) {
-        const absolute = (0, normalize_windows_path_js_1.normalizeWindowsPath)(path_1.default.resolve(this.cwd, p));
+        const absolute = normalizeWindowsPath(path.resolve(this.cwd, p));
         this[QUEUE].push(new PackJob(p, absolute));
         this[PROCESS]();
     }
@@ -261,7 +221,7 @@ class Pack extends minipass_1.Minipass {
         job.pending = true;
         this[JOBS] += 1;
         const stat = this.follow ? 'stat' : 'lstat';
-        fs_1.default[stat](job.absolute, (er, stat) => {
+        fs[stat](job.absolute, (er, stat) => {
             job.pending = false;
             this[JOBS] -= 1;
             if (er) {
@@ -307,7 +267,7 @@ class Pack extends minipass_1.Minipass {
     [READDIR](job) {
         job.pending = true;
         this[JOBS] += 1;
-        fs_1.default.readdir(job.absolute, (er, entries) => {
+        fs.readdir(job.absolute, (er, entries) => {
             job.pending = false;
             this[JOBS] -= 1;
             if (er) {
@@ -493,25 +453,24 @@ class Pack extends minipass_1.Minipass {
         return super.pause();
     }
     warn(code, message, data = {}) {
-        (0, warn_method_js_1.warnMethod)(this, code, message, data);
+        warnMethod(this, code, message, data);
     }
 }
-exports.Pack = Pack;
-class PackSync extends Pack {
+export class PackSync extends Pack {
     sync = true;
     constructor(opt) {
         super(opt);
-        this[WRITEENTRYCLASS] = write_entry_js_1.WriteEntrySync;
+        this[WRITEENTRYCLASS] = WriteEntrySync;
     }
     // pause/resume are no-ops in sync streams.
     pause() { }
     resume() { }
     [STAT](job) {
         const stat = this.follow ? 'statSync' : 'lstatSync';
-        this[ONSTAT](job, fs_1.default[stat](job.absolute));
+        this[ONSTAT](job, fs[stat](job.absolute));
     }
     [READDIR](job) {
-        this[ONREADDIR](job, fs_1.default.readdirSync(job.absolute));
+        this[ONREADDIR](job, fs.readdirSync(job.absolute));
     }
     // gotta get it all in this tick
     [PIPE](job) {
@@ -540,5 +499,4 @@ class PackSync extends Pack {
         }
     }
 }
-exports.PackSync = PackSync;
 //# sourceMappingURL=pack.js.map

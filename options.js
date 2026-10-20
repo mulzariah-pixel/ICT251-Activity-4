@@ -1,7 +1,4 @@
-"use strict";
 // turn tar(1) style args like `C` into the more verbose things like `cwd`
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.dealias = exports.isNoFile = exports.isFile = exports.isAsync = exports.isSync = exports.isAsyncNoFile = exports.isSyncNoFile = exports.isAsyncFile = exports.isSyncFile = void 0;
 const argmap = new Map([
     ['C', 'cwd'],
     ['f', 'file'],
@@ -24,29 +21,21 @@ const argmap = new Map([
     ['h', 'follow'],
     ['onentry', 'onReadEntry'],
 ]);
-const isSyncFile = (o) => !!o.sync && !!o.file;
-exports.isSyncFile = isSyncFile;
-const isAsyncFile = (o) => !o.sync && !!o.file;
-exports.isAsyncFile = isAsyncFile;
-const isSyncNoFile = (o) => !!o.sync && !o.file;
-exports.isSyncNoFile = isSyncNoFile;
-const isAsyncNoFile = (o) => !o.sync && !o.file;
-exports.isAsyncNoFile = isAsyncNoFile;
-const isSync = (o) => !!o.sync;
-exports.isSync = isSync;
-const isAsync = (o) => !o.sync;
-exports.isAsync = isAsync;
-const isFile = (o) => !!o.file;
-exports.isFile = isFile;
-const isNoFile = (o) => !o.file;
-exports.isNoFile = isNoFile;
+export const isSyncFile = (o) => !!o.sync && !!o.file;
+export const isAsyncFile = (o) => !o.sync && !!o.file;
+export const isSyncNoFile = (o) => !!o.sync && !o.file;
+export const isAsyncNoFile = (o) => !o.sync && !o.file;
+export const isSync = (o) => !!o.sync;
+export const isAsync = (o) => !o.sync;
+export const isFile = (o) => !!o.file;
+export const isNoFile = (o) => !o.file;
 const dealiasKey = (k) => {
     const d = argmap.get(k);
     if (d)
         return d;
     return k;
 };
-const dealias = (opt = {}) => {
+export const dealias = (opt = {}) => {
     if (!opt)
         return {};
     const result = {};
@@ -62,5 +51,4 @@ const dealias = (opt = {}) => {
     delete result.noChmod;
     return result;
 };
-exports.dealias = dealias;
 //# sourceMappingURL=options.js.map

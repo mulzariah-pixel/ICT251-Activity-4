@@ -1,10 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.code = exports.name = exports.normalFsTypes = exports.isName = exports.isCode = void 0;
-const isCode = (c) => exports.name.has(c);
-exports.isCode = isCode;
-const isName = (c) => exports.code.has(c);
-exports.isName = isName;
+export const isCode = (c) => name.has(c);
+export const isName = (c) => code.has(c);
 /**
  * types that are a normal file system entry, not metadata.
  *
@@ -13,7 +8,7 @@ exports.isName = isName;
  *
  * Any other types are meta, and cannot be targetted by extended PAX headers.
  */
-exports.normalFsTypes = new Set([
+export const normalFsTypes = new Set([
     '0',
     '',
     '1',
@@ -26,7 +21,7 @@ exports.normalFsTypes = new Set([
     'D',
 ]);
 // map types from key to human-friendly name
-exports.name = new Map([
+export const name = new Map([
     ['0', 'File'],
     // same as File
     ['', 'OldFile'],
@@ -66,5 +61,5 @@ exports.name = new Map([
     ['X', 'OldExtendedHeader'],
 ]);
 // map the other direction
-exports.code = new Map(Array.from(exports.name).map(kv => [kv[1], kv[0]]));
+export const code = new Map(Array.from(name).map(kv => [kv[1], kv[0]]));
 //# sourceMappingURL=types.js.map

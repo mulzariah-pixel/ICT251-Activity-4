@@ -1,9 +1,6 @@
-"use strict";
 // Tar can encode large and negative numbers using a leading byte of
 // 0xff for negative, and 0x80 for positive.
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.parse = exports.encode = void 0;
-const encode = (num, buf) => {
+export const encode = (num, buf) => {
     if (!Number.isSafeInteger(num)) {
         // The number is so large that javascript cannot represent it with integer
         // precision.
@@ -17,7 +14,6 @@ const encode = (num, buf) => {
     }
     return buf;
 };
-exports.encode = encode;
 const encodePositive = (num, buf) => {
     buf[0] = 0x80;
     for (var i = buf.length; i > 1; i--) {
@@ -44,7 +40,7 @@ const encodeNegative = (num, buf) => {
         }
     }
 };
-const parse = (buf) => {
+export const parse = (buf) => {
     const pre = buf[0];
     const value = pre === 0x80 ? pos(buf.subarray(1, buf.length))
         : pre === 0xff ? twos(buf)
@@ -59,7 +55,6 @@ const parse = (buf) => {
     }
     return value;
 };
-exports.parse = parse;
 const twos = (buf) => {
     var len = buf.length;
     var sum = 0;

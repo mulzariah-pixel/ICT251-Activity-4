@@ -1,4 +1,3 @@
-"use strict";
 // A path exclusive reservation system
 // reserve([list, of, paths], fn)
 // When the fn is first in line for all its paths, it
@@ -6,11 +5,9 @@
 //
 // Used by async unpack to avoid clobbering paths in use,
 // while still allowing maximal safe parallelization.
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PathReservations = void 0;
-const node_path_1 = require("node:path");
-const normalize_unicode_js_1 = require("./normalize-unicode.js");
-const strip_trailing_slashes_js_1 = require("./strip-trailing-slashes.js");
+import { join } from 'node:path';
+import { normalizeUnicode } from './normalize-unicode.js';
+import { stripTrailingSlashes } from './strip-trailing-slashes.js';
 const platform = process.env.TESTING_TAR_FAKE_PLATFORM || process.platform;
 const isWindows = platform === 'win32';
 // return a set of parent dirs for a given path
@@ -22,14 +19,14 @@ const getDirs = (path) => {
         .reduce((set, path) => {
         const s = set.at(-1);
         if (s !== undefined) {
-            path = (0, node_path_1.join)(s, path);
+            path = join(s, path);
         }
         set.push(path || '/');
         return set;
     }, []);
     return dirs;
 };
-class PathReservations {
+export class PathReservations {
     // path => [function or Set]
     // A Set object means a directory reservation
     // A fn is a direct reservation on that path
@@ -44,7 +41,7 @@ class PathReservations {
                 ['win32 parallelization disabled']
                 : paths.map(p => {
                     // don't need normPath, because we skip this entirely for windows
-                    return (0, strip_trailing_slashes_js_1.stripTrailingSlashes)((0, node_path_1.join)((0, normalize_unicode_js_1.normalizeUnicode)(p)));
+                    return stripTrailingSlashes(join(normalizeUnicode(p)));
                 });
         const dirs = new Set(paths.map(path => getDirs(path)).reduce((a, b) => a.concat(b)));
         this.#reservations.set(fn, { dirs, paths });
@@ -166,5 +163,4 @@ class PathReservations {
         return true;
     }
 }
-exports.PathReservations = PathReservations;
 //# sourceMappingURL=path-reservations.js.map

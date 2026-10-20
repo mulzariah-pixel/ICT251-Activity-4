@@ -1,61 +1,22 @@
-"use strict";
 // the PEND/UNPEND stuff tracks whether we're ready to emit end/close yet.
 // but the path reservations are required to avoid race conditions where
 // parallelized unpack ops may mess with one another, due to dependencies
 // (like a Link depending on its target) or destructive operations (like
 // clobbering an fs object to create one of a different type.)
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.UnpackSync = exports.Unpack = void 0;
-const fsm = __importStar(require("@isaacs/fs-minipass"));
-const node_assert_1 = __importDefault(require("node:assert"));
-const node_crypto_1 = require("node:crypto");
-const node_fs_1 = __importDefault(require("node:fs"));
-const node_path_1 = __importDefault(require("node:path"));
-const get_write_flag_js_1 = require("./get-write-flag.js");
-const mkdir_js_1 = require("./mkdir.js");
-const normalize_windows_path_js_1 = require("./normalize-windows-path.js");
-const parse_js_1 = require("./parse.js");
-const strip_absolute_path_js_1 = require("./strip-absolute-path.js");
-const wc = __importStar(require("./winchars.js"));
-const path_reservations_js_1 = require("./path-reservations.js");
-const symlink_error_js_1 = require("./symlink-error.js");
-const process_umask_js_1 = require("./process-umask.js");
+import * as fsm from '@isaacs/fs-minipass';
+import assert from 'node:assert';
+import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getWriteFlag } from './get-write-flag.js';
+import { mkdir, mkdirSync } from './mkdir.js';
+import { normalizeWindowsPath } from './normalize-windows-path.js';
+import { Parser } from './parse.js';
+import { stripAbsolutePath } from './strip-absolute-path.js';
+import * as wc from './winchars.js';
+import { PathReservations } from './path-reservations.js';
+import { SymlinkError } from './symlink-error.js';
+import { umask } from './process-umask.js';
 const ONENTRY = Symbol('onEntry');
 const CHECKFS = Symbol('checkFs');
 const CHECKFS2 = Symbol('checkFs2');
@@ -103,36 +64,36 @@ const DEFAULT_MAX_DEPTH = 1024;
 /* c8 ignore start */
 const unlinkFile = (path, cb) => {
     if (!isWindows) {
-        return node_fs_1.default.unlink(path, cb);
+        return fs.unlink(path, cb);
     }
-    const name = path + '.DELETE.' + (0, node_crypto_1.randomBytes)(16).toString('hex');
-    node_fs_1.default.rename(path, name, er => {
+    const name = path + '.DELETE.' + randomBytes(16).toString('hex');
+    fs.rename(path, name, er => {
         if (er) {
             return cb(er);
         }
-        node_fs_1.default.unlink(name, cb);
+        fs.unlink(name, cb);
     });
 };
 /* c8 ignore stop */
 /* c8 ignore start */
 const unlinkFileSync = (path) => {
     if (!isWindows) {
-        return node_fs_1.default.unlinkSync(path);
+        return fs.unlinkSync(path);
     }
-    const name = path + '.DELETE.' + (0, node_crypto_1.randomBytes)(16).toString('hex');
-    node_fs_1.default.renameSync(path, name);
-    node_fs_1.default.unlinkSync(name);
+    const name = path + '.DELETE.' + randomBytes(16).toString('hex');
+    fs.renameSync(path, name);
+    fs.unlinkSync(name);
 };
 /* c8 ignore stop */
 // this.gid, entry.gid, this.processUid
 const uint32 = (a, b, c) => a !== undefined && a === a >>> 0 ? a
     : b !== undefined && b === b >>> 0 ? b
         : c;
-class Unpack extends parse_js_1.Parser {
+export class Unpack extends Parser {
     [ENDED] = false;
     [CHECKED_CWD] = false;
     [PENDING] = 0;
-    reservations = new path_reservations_js_1.PathReservations();
+    reservations = new PathReservations();
     transform;
     writable = true;
     readable = false;
@@ -217,13 +178,13 @@ class Unpack extends parse_js_1.Parser {
         // unlink files and links before writing. This breaks existing hard
         // links, and removes symlink directories rather than erroring
         this.unlink = !!opt.unlink;
-        this.cwd = (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.resolve(opt.cwd || process.cwd()));
+        this.cwd = normalizeWindowsPath(path.resolve(opt.cwd || process.cwd()));
         this.strip = Number(opt.strip) || 0;
         // if we're not chmodding, then we don't need the process umask
         this.processUmask =
             !this.chmod ? 0
                 : typeof opt.processUmask === 'number' ? opt.processUmask
-                    : (0, process_umask_js_1.umask)();
+                    : umask();
         this.umask =
             typeof opt.umask === 'number' ? opt.umask : this.processUmask;
         // default mode for dirs created as parents
@@ -255,7 +216,7 @@ class Unpack extends parse_js_1.Parser {
         if (!p || this.preservePaths)
             return true;
         // strip off the root
-        const [root, stripped] = (0, strip_absolute_path_js_1.stripAbsolutePath)(p);
+        const [root, stripped] = stripAbsolutePath(p);
         const parts = stripped.replaceAll(/\\/g, '/').split('/');
         if (parts.includes('..') ||
             /* c8 ignore next */
@@ -275,8 +236,8 @@ class Unpack extends parse_js_1.Parser {
             // Resolve linkpath relative to the entry's directory.
             // `path.posix` is safe to use because we're operating on
             // tar paths, not a filesystem.
-            const entryDir = node_path_1.default.posix.dirname(entry.path);
-            const resolved = node_path_1.default.posix.normalize(node_path_1.default.posix.join(entryDir, parts.join('/')));
+            const entryDir = path.posix.dirname(entry.path);
+            const resolved = path.posix.normalize(path.posix.join(entryDir, parts.join('/')));
             // If the resolved path escapes (starts with ..), reject it
             if (resolved.startsWith('../') || resolved === '..') {
                 this.warn('TAR_ENTRY_ERROR', `${field} escapes extraction directory`, {
@@ -298,14 +259,14 @@ class Unpack extends parse_js_1.Parser {
     }
     // no IO, just string checking for absolute indicators
     [CHECKPATH](entry) {
-        const p = (0, normalize_windows_path_js_1.normalizeWindowsPath)(entry.path);
+        const p = normalizeWindowsPath(entry.path);
         const parts = p.split('/');
         if (this.strip) {
             if (parts.length < this.strip) {
                 return false;
             }
             if (entry.type === 'Link') {
-                const linkparts = (0, normalize_windows_path_js_1.normalizeWindowsPath)(String(entry.linkpath)).split('/');
+                const linkparts = normalizeWindowsPath(String(entry.linkpath)).split('/');
                 if (linkparts.length >= this.strip) {
                     entry.linkpath = linkparts.slice(this.strip).join('/');
                 }
@@ -330,9 +291,9 @@ class Unpack extends parse_js_1.Parser {
             return false;
         }
         entry.absolute =
-            node_path_1.default.isAbsolute(entry.path) ?
-                (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.resolve(entry.path))
-                : (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.resolve(this.cwd, entry.path));
+            path.isAbsolute(entry.path) ?
+                normalizeWindowsPath(path.resolve(entry.path))
+                : normalizeWindowsPath(path.resolve(this.cwd, entry.path));
         // if we somehow ended up with a path that escapes the cwd, and we are
         // not in preservePaths mode, then something is fishy!  This should have
         // been prevented above, so ignore this for coverage.
@@ -343,7 +304,7 @@ class Unpack extends parse_js_1.Parser {
             entry.absolute !== this.cwd) {
             this.warn('TAR_ENTRY_ERROR', 'path escaped extraction target', {
                 entry,
-                path: (0, normalize_windows_path_js_1.normalizeWindowsPath)(entry.path),
+                path: normalizeWindowsPath(entry.path),
                 resolvedPath: entry.absolute,
                 cwd: this.cwd,
             });
@@ -359,10 +320,10 @@ class Unpack extends parse_js_1.Parser {
         }
         // only encode : chars that aren't drive letter indicators
         if (this.win32) {
-            const { root: aRoot } = node_path_1.default.win32.parse(String(entry.absolute));
+            const { root: aRoot } = path.win32.parse(String(entry.absolute));
             entry.absolute =
                 aRoot + wc.encode(String(entry.absolute).slice(aRoot.length));
-            const { root: pRoot } = node_path_1.default.win32.parse(entry.path);
+            const { root: pRoot } = path.win32.parse(entry.path);
             entry.path = pRoot + wc.encode(entry.path.slice(pRoot.length));
         }
         return true;
@@ -371,7 +332,7 @@ class Unpack extends parse_js_1.Parser {
         if (!this[CHECKPATH](entry)) {
             return entry.resume();
         }
-        node_assert_1.default.equal(typeof entry.absolute, 'string');
+        assert.equal(typeof entry.absolute, 'string');
         switch (entry.type) {
             case 'Directory':
             case 'GNUDumpDir':
@@ -406,7 +367,7 @@ class Unpack extends parse_js_1.Parser {
         }
     }
     [MKDIR](dir, mode, cb) {
-        void (0, mkdir_js_1.mkdir)((0, normalize_windows_path_js_1.normalizeWindowsPath)(dir), {
+        void mkdir(normalizeWindowsPath(dir), {
             uid: this.uid,
             gid: this.gid,
             processUid: this.processUid,
@@ -440,13 +401,13 @@ class Unpack extends parse_js_1.Parser {
         const mode = typeof entry.mode === 'number' ? entry.mode & 0o7777 : this.fmode;
         const stream = new fsm.WriteStream(String(entry.absolute), {
             // slight lie, but it can be numeric flags
-            flags: (0, get_write_flag_js_1.getWriteFlag)(entry.size),
+            flags: getWriteFlag(entry.size),
             mode: mode,
             autoClose: false,
         });
         stream.on('error', (er) => {
             if (stream.fd) {
-                node_fs_1.default.close(stream.fd, () => { });
+                fs.close(stream.fd, () => { });
             }
             // flush all the data out so that we aren't left hanging
             // if the error wasn't actually fatal.  otherwise the parse
@@ -460,7 +421,7 @@ class Unpack extends parse_js_1.Parser {
             if (er) {
                 /* c8 ignore start - we should always have a fd by now */
                 if (stream.fd) {
-                    node_fs_1.default.close(stream.fd, () => { });
+                    fs.close(stream.fd, () => { });
                 }
                 /* c8 ignore stop */
                 this[ONERROR](er, entry);
@@ -469,7 +430,7 @@ class Unpack extends parse_js_1.Parser {
             }
             if (--actions === 0) {
                 if (stream.fd !== undefined) {
-                    node_fs_1.default.close(stream.fd, er => {
+                    fs.close(stream.fd, er => {
                         if (er) {
                             this[ONERROR](er, entry);
                         }
@@ -491,8 +452,8 @@ class Unpack extends parse_js_1.Parser {
                 actions++;
                 const atime = entry.atime || new Date();
                 const mtime = entry.mtime;
-                node_fs_1.default.futimes(fd, atime, mtime, er => er ?
-                    node_fs_1.default.utimes(abs, atime, mtime, er2 => done(er2 && er))
+                fs.futimes(fd, atime, mtime, er => er ?
+                    fs.utimes(abs, atime, mtime, er2 => done(er2 && er))
                     : done());
             }
             if (typeof fd === 'number' && this[DOCHOWN](entry)) {
@@ -500,7 +461,7 @@ class Unpack extends parse_js_1.Parser {
                 const uid = this[UID](entry);
                 const gid = this[GID](entry);
                 if (typeof uid === 'number' && typeof gid === 'number') {
-                    node_fs_1.default.fchown(fd, uid, gid, er => er ? node_fs_1.default.chown(abs, uid, gid, er2 => done(er2 && er)) : done());
+                    fs.fchown(fd, uid, gid, er => er ? fs.chown(abs, uid, gid, er2 => done(er2 && er)) : done());
                 }
             }
             done();
@@ -533,11 +494,11 @@ class Unpack extends parse_js_1.Parser {
             };
             if (entry.mtime && !this.noMtime) {
                 actions++;
-                node_fs_1.default.utimes(String(entry.absolute), entry.atime || new Date(), entry.mtime, done);
+                fs.utimes(String(entry.absolute), entry.atime || new Date(), entry.mtime, done);
             }
             if (this[DOCHOWN](entry)) {
                 actions++;
-                node_fs_1.default.chown(String(entry.absolute), Number(this[UID](entry)), Number(this[GID](entry)), done);
+                fs.chown(String(entry.absolute), Number(this[UID](entry)), Number(this[GID](entry)), done);
             }
             done();
         });
@@ -548,15 +509,15 @@ class Unpack extends parse_js_1.Parser {
         entry.resume();
     }
     [SYMLINK](entry, done) {
-        const parts = (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.relative(this.cwd, node_path_1.default.resolve(node_path_1.default.dirname(String(entry.absolute)), String(entry.linkpath)))).split('/');
+        const parts = normalizeWindowsPath(path.relative(this.cwd, path.resolve(path.dirname(String(entry.absolute)), String(entry.linkpath)))).split('/');
         this[ENSURE_NO_SYMLINK](entry, this.cwd, parts, () => this[LINK](entry, String(entry.linkpath), 'symlink', done), er => {
             this[ONERROR](er, entry);
             done();
         });
     }
     [HARDLINK](entry, done) {
-        const linkpath = (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.resolve(this.cwd, String(entry.linkpath)));
-        const parts = (0, normalize_windows_path_js_1.normalizeWindowsPath)(String(entry.linkpath)).split('/');
+        const linkpath = normalizeWindowsPath(path.resolve(this.cwd, String(entry.linkpath)));
+        const parts = normalizeWindowsPath(String(entry.linkpath)).split('/');
         this[ENSURE_NO_SYMLINK](entry, this.cwd, parts, () => this[LINK](entry, linkpath, 'link', done), er => {
             this[ONERROR](er, entry);
             done();
@@ -566,12 +527,12 @@ class Unpack extends parse_js_1.Parser {
         const p = parts.shift();
         if (this.preservePaths || p === undefined)
             return done();
-        const t = node_path_1.default.resolve(cwd, p);
-        node_fs_1.default.lstat(t, (er, st) => {
+        const t = path.resolve(cwd, p);
+        fs.lstat(t, (er, st) => {
             if (er)
                 return done();
             if (st?.isSymbolicLink()) {
-                return onError(new symlink_error_js_1.SymlinkError(t, node_path_1.default.resolve(t, parts.join('/'))));
+                return onError(new SymlinkError(t, path.resolve(t, parts.join('/'))));
             }
             this[ENSURE_NO_SYMLINK](entry, t, parts, done, onError);
         });
@@ -623,7 +584,7 @@ class Unpack extends parse_js_1.Parser {
         };
         const start = () => {
             if (entry.absolute !== this.cwd) {
-                const parent = (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.dirname(String(entry.absolute)));
+                const parent = normalizeWindowsPath(path.dirname(String(entry.absolute)));
                 if (parent !== this.cwd) {
                     return this[MKDIR](parent, this.dmode, er => {
                         if (er) {
@@ -638,7 +599,7 @@ class Unpack extends parse_js_1.Parser {
             afterMakeParent();
         };
         const afterMakeParent = () => {
-            node_fs_1.default.lstat(String(entry.absolute), (lstatEr, st) => {
+            fs.lstat(String(entry.absolute), (lstatEr, st) => {
                 if (st &&
                     (this.keep ||
                         /* c8 ignore next */
@@ -657,7 +618,7 @@ class Unpack extends parse_js_1.Parser {
                         if (!needChmod) {
                             return afterChmod();
                         }
-                        return node_fs_1.default.chmod(String(entry.absolute), Number(entry.mode), afterChmod);
+                        return fs.chmod(String(entry.absolute), Number(entry.mode), afterChmod);
                     }
                     // Not a dir entry, have to remove it.
                     // NB: the only way to end up with an entry that is the cwd
@@ -667,7 +628,7 @@ class Unpack extends parse_js_1.Parser {
                     // In that case, the user has opted out of path protections
                     // explicitly, so if they blow away the cwd, c'est la vie.
                     if (entry.absolute !== this.cwd) {
-                        return node_fs_1.default.rmdir(String(entry.absolute), (er) => this[MAKEFS](er ?? null, entry, done));
+                        return fs.rmdir(String(entry.absolute), (er) => this[MAKEFS](er ?? null, entry, done));
                     }
                 }
                 // not a dir, and not reusable
@@ -706,7 +667,7 @@ class Unpack extends parse_js_1.Parser {
         }
     }
     [LINK](entry, linkpath, link, done) {
-        node_fs_1.default[link](linkpath, String(entry.absolute), er => {
+        fs[link](linkpath, String(entry.absolute), er => {
             if (er) {
                 this[ONERROR](er, entry);
             }
@@ -718,7 +679,6 @@ class Unpack extends parse_js_1.Parser {
         });
     }
 }
-exports.Unpack = Unpack;
 const callSync = (fn) => {
     try {
         return [null, fn()];
@@ -727,7 +687,7 @@ const callSync = (fn) => {
         return [er, null];
     }
 };
-class UnpackSync extends Unpack {
+export class UnpackSync extends Unpack {
     sync = true;
     [MAKEFS](er, entry) {
         return super[MAKEFS](er, entry, () => { });
@@ -743,7 +703,7 @@ class UnpackSync extends Unpack {
         // don't bother to make the parent if the current entry is the cwd,
         // we've already checked it.
         if (entry.absolute !== this.cwd) {
-            const parent = (0, normalize_windows_path_js_1.normalizeWindowsPath)(node_path_1.default.dirname(String(entry.absolute)));
+            const parent = normalizeWindowsPath(path.dirname(String(entry.absolute)));
             if (parent !== this.cwd) {
                 const mkParent = this[MKDIR](parent, this.dmode);
                 if (mkParent) {
@@ -751,7 +711,7 @@ class UnpackSync extends Unpack {
                 }
             }
         }
-        const [lstatEr, st] = callSync(() => node_fs_1.default.lstatSync(String(entry.absolute)));
+        const [lstatEr, st] = callSync(() => fs.lstatSync(String(entry.absolute)));
         if (st &&
             (this.keep ||
                 /* c8 ignore next */
@@ -766,13 +726,13 @@ class UnpackSync extends Unpack {
                 const needChmod = this.chmod && entry.mode && (st.mode & 0o7777) !== entry.mode;
                 const [er] = needChmod ?
                     callSync(() => {
-                        node_fs_1.default.chmodSync(String(entry.absolute), Number(entry.mode));
+                        fs.chmodSync(String(entry.absolute), Number(entry.mode));
                     })
                     : [];
                 return this[MAKEFS](er, entry);
             }
             // not a dir entry, have to remove it
-            const [er] = callSync(() => node_fs_1.default.rmdirSync(String(entry.absolute)));
+            const [er] = callSync(() => fs.rmdirSync(String(entry.absolute)));
             this[MAKEFS](er, entry);
         }
         // not a dir, and not reusable.
@@ -787,7 +747,7 @@ class UnpackSync extends Unpack {
         const oner = (er) => {
             let closeError;
             try {
-                node_fs_1.default.closeSync(fd);
+                fs.closeSync(fd);
             }
             catch (e) {
                 closeError = e;
@@ -799,7 +759,7 @@ class UnpackSync extends Unpack {
         };
         let fd;
         try {
-            fd = node_fs_1.default.openSync(String(entry.absolute), (0, get_write_flag_js_1.getWriteFlag)(entry.size), mode);
+            fd = fs.openSync(String(entry.absolute), getWriteFlag(entry.size), mode);
             /* c8 ignore start - This is only a problem if the file was successfully
              * statted, BUT failed to open. Testing this is annoying, and we
              * already have ample testint for other uses of oner() methods.
@@ -816,7 +776,7 @@ class UnpackSync extends Unpack {
         }
         tx.on('data', (chunk) => {
             try {
-                node_fs_1.default.writeSync(fd, chunk, 0, chunk.length);
+                fs.writeSync(fd, chunk, 0, chunk.length);
             }
             catch (er) {
                 oner(er);
@@ -830,11 +790,11 @@ class UnpackSync extends Unpack {
                 const atime = entry.atime || new Date();
                 const mtime = entry.mtime;
                 try {
-                    node_fs_1.default.futimesSync(fd, atime, mtime);
+                    fs.futimesSync(fd, atime, mtime);
                 }
                 catch (futimeser) {
                     try {
-                        node_fs_1.default.utimesSync(String(entry.absolute), atime, mtime);
+                        fs.utimesSync(String(entry.absolute), atime, mtime);
                     }
                     catch {
                         er = futimeser;
@@ -845,11 +805,11 @@ class UnpackSync extends Unpack {
                 const uid = this[UID](entry);
                 const gid = this[GID](entry);
                 try {
-                    node_fs_1.default.fchownSync(fd, Number(uid), Number(gid));
+                    fs.fchownSync(fd, Number(uid), Number(gid));
                 }
                 catch (fchowner) {
                     try {
-                        node_fs_1.default.chownSync(String(entry.absolute), Number(uid), Number(gid));
+                        fs.chownSync(String(entry.absolute), Number(uid), Number(gid));
                     }
                     catch {
                         er = er || fchowner;
@@ -869,14 +829,14 @@ class UnpackSync extends Unpack {
         }
         if (entry.mtime && !this.noMtime) {
             try {
-                node_fs_1.default.utimesSync(String(entry.absolute), entry.atime || new Date(), entry.mtime);
+                fs.utimesSync(String(entry.absolute), entry.atime || new Date(), entry.mtime);
                 /* c8 ignore next */
             }
             catch { }
         }
         if (this[DOCHOWN](entry)) {
             try {
-                node_fs_1.default.chownSync(String(entry.absolute), Number(this[UID](entry)), Number(this[GID](entry)));
+                fs.chownSync(String(entry.absolute), Number(this[UID](entry)), Number(this[GID](entry)));
             }
             catch { }
         }
@@ -885,7 +845,7 @@ class UnpackSync extends Unpack {
     }
     [MKDIR](dir, mode) {
         try {
-            return (0, mkdir_js_1.mkdirSync)((0, normalize_windows_path_js_1.normalizeWindowsPath)(dir), {
+            return mkdirSync(normalizeWindowsPath(dir), {
                 uid: this.uid,
                 gid: this.gid,
                 processUid: this.processUid,
@@ -906,12 +866,12 @@ class UnpackSync extends Unpack {
             return done();
         let t = cwd;
         for (const p of parts) {
-            t = node_path_1.default.resolve(t, p);
-            const [er, st] = callSync(() => node_fs_1.default.lstatSync(t));
+            t = path.resolve(t, p);
+            const [er, st] = callSync(() => fs.lstatSync(t));
             if (er)
                 return done();
             if (st.isSymbolicLink()) {
-                return onError(new symlink_error_js_1.SymlinkError(t, node_path_1.default.resolve(cwd, parts.join('/'))));
+                return onError(new SymlinkError(t, path.resolve(cwd, parts.join('/'))));
             }
         }
         done();
@@ -919,7 +879,7 @@ class UnpackSync extends Unpack {
     [LINK](entry, linkpath, link, done) {
         const linkSync = `${link}Sync`;
         try {
-            node_fs_1.default[linkSync](linkpath, String(entry.absolute));
+            fs[linkSync](linkpath, String(entry.absolute));
             done();
             entry.resume();
         }
@@ -928,5 +888,4 @@ class UnpackSync extends Unpack {
         }
     }
 }
-exports.UnpackSync = UnpackSync;
 //# sourceMappingURL=unpack.js.map

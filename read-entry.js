@@ -1,9 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ReadEntry = void 0;
-const minipass_1 = require("minipass");
-const normalize_windows_path_js_1 = require("./normalize-windows-path.js");
-class ReadEntry extends minipass_1.Minipass {
+import { Minipass } from 'minipass';
+import { normalizeWindowsPath } from './normalize-windows-path.js';
+export class ReadEntry extends Minipass {
     extended;
     globalExtended;
     header;
@@ -75,7 +72,7 @@ class ReadEntry extends minipass_1.Minipass {
             throw new Error('no path provided for tar.ReadEntry');
         }
         /* c8 ignore stop */
-        this.path = (0, normalize_windows_path_js_1.normalizeWindowsPath)(header.path);
+        this.path = normalizeWindowsPath(header.path);
         this.mode = header.mode;
         if (this.mode) {
             this.mode = this.mode & 0o7777;
@@ -90,7 +87,7 @@ class ReadEntry extends minipass_1.Minipass {
         this.ctime = header.ctime;
         /* c8 ignore start */
         this.linkpath =
-            header.linkpath ? (0, normalize_windows_path_js_1.normalizeWindowsPath)(header.linkpath) : undefined;
+            header.linkpath ? normalizeWindowsPath(header.linkpath) : undefined;
         /* c8 ignore stop */
         this.uname = header.uname;
         this.gname = header.gname;
@@ -121,9 +118,9 @@ class ReadEntry extends minipass_1.Minipass {
     }
     #slurp(ex, gex = false) {
         if (ex.path)
-            ex.path = (0, normalize_windows_path_js_1.normalizeWindowsPath)(ex.path);
+            ex.path = normalizeWindowsPath(ex.path);
         if (ex.linkpath)
-            ex.linkpath = (0, normalize_windows_path_js_1.normalizeWindowsPath)(ex.linkpath);
+            ex.linkpath = normalizeWindowsPath(ex.linkpath);
         Object.assign(this, Object.fromEntries(Object.entries(ex).filter(([k, v]) => {
             // we slurp in everything except for the path attribute in
             // a global extended header, because that's weird. Also, any
@@ -132,5 +129,4 @@ class ReadEntry extends minipass_1.Minipass {
         })));
     }
 }
-exports.ReadEntry = ReadEntry;
 //# sourceMappingURL=read-entry.js.map

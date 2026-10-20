@@ -1,45 +1,39 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.replace = void 0;
 // tar -r
-const fs_minipass_1 = require("@isaacs/fs-minipass");
-const node_fs_1 = __importDefault(require("node:fs"));
-const node_path_1 = __importDefault(require("node:path"));
-const header_js_1 = require("./header.js");
-const list_js_1 = require("./list.js");
-const make_command_js_1 = require("./make-command.js");
-const options_js_1 = require("./options.js");
-const pack_js_1 = require("./pack.js");
+import { WriteStream, WriteStreamSync } from '@isaacs/fs-minipass';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Header } from './header.js';
+import { list } from './list.js';
+import { makeCommand } from './make-command.js';
+import { isFile } from './options.js';
+import { Pack, PackSync } from './pack.js';
 // starting at the head of the file, read a Header
 // If the checksum is invalid, that's our position to start writing
 // If it is, jump forward by the specified size (round up to 512)
 // and try again.
 // Write the new Pack stream starting there.
 const replaceSync = (opt, files) => {
-    const p = new pack_js_1.PackSync(opt);
+    const p = new PackSync(opt);
     let threw = true;
     let fd;
     let position;
     try {
         try {
-            fd = node_fs_1.default.openSync(opt.file, 'r+');
+            fd = fs.openSync(opt.file, 'r+');
         }
         catch (er) {
             if (er?.code === 'ENOENT') {
-                fd = node_fs_1.default.openSync(opt.file, 'w+');
+                fd = fs.openSync(opt.file, 'w+');
             }
             else {
                 throw er;
             }
         }
-        const st = node_fs_1.default.fstatSync(fd);
+        const st = fs.fstatSync(fd);
         const headBuf = Buffer.alloc(512);
         POSITION: for (position = 0; position < st.size; position += 512) {
             for (let bufPos = 0, bytes = 0; bufPos < 512; bufPos += bytes) {
-                bytes = node_fs_1.default.readSync(fd, headBuf, bufPos, headBuf.length - bufPos, position + bufPos);
+                bytes = fs.readSync(fd, headBuf, bufPos, headBuf.length - bufPos, position + bufPos);
                 if (position === 0 && headBuf[0] === 0x1f && headBuf[1] === 0x8b) {
                     throw new Error('cannot append to compressed archives');
                 }
@@ -47,7 +41,7 @@ const replaceSync = (opt, files) => {
                     break POSITION;
                 }
             }
-            const h = new header_js_1.Header(headBuf);
+            const h = new Header(headBuf);
             if (!h.cksumValid) {
                 break;
             }
@@ -68,14 +62,14 @@ const replaceSync = (opt, files) => {
     finally {
         if (threw) {
             try {
-                node_fs_1.default.closeSync(fd);
+                fs.closeSync(fd);
             }
             catch { }
         }
     }
 };
 const streamSync = (opt, p, position, fd, files) => {
-    const stream = new fs_minipass_1.WriteStreamSync(opt.file, {
+    const stream = new WriteStreamSync(opt.file, {
         fd: fd,
         start: position,
     });
@@ -84,11 +78,11 @@ const streamSync = (opt, p, position, fd, files) => {
 };
 const replaceAsync = (opt, files) => {
     files = Array.from(files);
-    const p = new pack_js_1.Pack(opt);
+    const p = new Pack(opt);
     const getPos = (fd, size, cb_) => {
         const cb = (er, pos) => {
             if (er) {
-                node_fs_1.default.close(fd, _ => cb_(er));
+                fs.close(fd, _ => cb_(er));
             }
             else {
                 cb_(null, pos);
@@ -106,7 +100,7 @@ const replaceAsync = (opt, files) => {
             }
             bufPos += bytes;
             if (bufPos < 512 && bytes) {
-                return node_fs_1.default.read(fd, headBuf, bufPos, headBuf.length - bufPos, position + bufPos, onread);
+                return fs.read(fd, headBuf, bufPos, headBuf.length - bufPos, position + bufPos, onread);
             }
             if (position === 0 && headBuf[0] === 0x1f && headBuf[1] === 0x8b) {
                 return cb(new Error('cannot append to compressed archives'));
@@ -115,7 +109,7 @@ const replaceAsync = (opt, files) => {
             if (bufPos < 512) {
                 return cb(null, position);
             }
-            const h = new header_js_1.Header(headBuf);
+            const h = new Header(headBuf);
             if (!h.cksumValid) {
                 return cb(null, position);
             }
@@ -132,9 +126,9 @@ const replaceAsync = (opt, files) => {
                 opt.mtimeCache.set(String(h.path), h.mtime);
             }
             bufPos = 0;
-            node_fs_1.default.read(fd, headBuf, 0, 512, position, onread);
+            fs.read(fd, headBuf, 0, 512, position, onread);
         };
-        node_fs_1.default.read(fd, headBuf, 0, 512, position, onread);
+        fs.read(fd, headBuf, 0, 512, position, onread);
     };
     const promise = new Promise((resolve, reject) => {
         p.on('error', reject);
@@ -142,20 +136,20 @@ const replaceAsync = (opt, files) => {
         const onopen = (er, fd) => {
             if (er && er.code === 'ENOENT' && flag === 'r+') {
                 flag = 'w+';
-                return node_fs_1.default.open(opt.file, flag, onopen);
+                return fs.open(opt.file, flag, onopen);
             }
             if (er || !fd) {
                 return reject(er);
             }
-            node_fs_1.default.fstat(fd, (er, st) => {
+            fs.fstat(fd, (er, st) => {
                 if (er) {
-                    return node_fs_1.default.close(fd, () => reject(er));
+                    return fs.close(fd, () => reject(er));
                 }
                 getPos(fd, st.size, (er, position) => {
                     if (er) {
                         return reject(er);
                     }
-                    const stream = new fs_minipass_1.WriteStream(opt.file, {
+                    const stream = new WriteStream(opt.file, {
                         fd: fd,
                         start: position,
                     });
@@ -166,15 +160,15 @@ const replaceAsync = (opt, files) => {
                 });
             });
         };
-        node_fs_1.default.open(opt.file, flag, onopen);
+        fs.open(opt.file, flag, onopen);
     });
     return promise;
 };
 const addFilesSync = (p, files) => {
     files.forEach(file => {
         if (file.charAt(0) === '@') {
-            (0, list_js_1.list)({
-                file: node_path_1.default.resolve(p.cwd, file.slice(1)),
+            list({
+                file: path.resolve(p.cwd, file.slice(1)),
                 sync: true,
                 noResume: true,
                 onReadEntry: entry => p.add(entry),
@@ -189,8 +183,8 @@ const addFilesSync = (p, files) => {
 const addFilesAsync = async (p, files) => {
     for (const file of files) {
         if (file.charAt(0) === '@') {
-            await (0, list_js_1.list)({
-                file: node_path_1.default.resolve(String(p.cwd), file.slice(1)),
+            await list({
+                file: path.resolve(String(p.cwd), file.slice(1)),
                 noResume: true,
                 onReadEntry: entry => p.add(entry),
             });
@@ -201,7 +195,7 @@ const addFilesAsync = async (p, files) => {
     }
     p.end();
 };
-exports.replace = (0, make_command_js_1.makeCommand)(replaceSync, replaceAsync, 
+export const replace = makeCommand(replaceSync, replaceAsync, 
 /* c8 ignore start */
 () => {
     throw new TypeError('file is required');
@@ -210,7 +204,7 @@ exports.replace = (0, make_command_js_1.makeCommand)(replaceSync, replaceAsync,
 }, 
 /* c8 ignore stop */
 (opt, entries) => {
-    if (!(0, options_js_1.isFile)(opt)) {
+    if (!isFile(opt)) {
         throw new TypeError('file is required');
     }
     if (opt.gzip ||

@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.modeFix = void 0;
-const modeFix = (mode, isDir, portable) => {
+export const modeFix = (mode, isDir, portable) => {
     mode &= 0o7777;
     // in portable mode, use the minimum reasonable umask
     // if this system creates files with 0o664 by default
@@ -25,5 +22,4 @@ const modeFix = (mode, isDir, portable) => {
     }
     return mode;
 };
-exports.modeFix = modeFix;
 //# sourceMappingURL=mode-fix.js.map

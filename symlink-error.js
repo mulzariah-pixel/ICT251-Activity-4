@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SymlinkError = void 0;
-class SymlinkError extends Error {
+export class SymlinkError extends Error {
     path;
     symlink;
     syscall = 'symlink';
@@ -15,5 +12,4 @@ class SymlinkError extends Error {
         return 'SymlinkError';
     }
 }
-exports.SymlinkError = SymlinkError;
 //# sourceMappingURL=symlink-error.js.map

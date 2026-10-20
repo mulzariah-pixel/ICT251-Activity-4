@@ -1,12 +1,9 @@
-"use strict";
 // tar -u
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.update = void 0;
-const make_command_js_1 = require("./make-command.js");
-const replace_js_1 = require("./replace.js");
+import { makeCommand } from './make-command.js';
+import { replace as r } from './replace.js';
 // just call tar.r with the filter and mtimeCache
-exports.update = (0, make_command_js_1.makeCommand)(replace_js_1.replace.syncFile, replace_js_1.replace.asyncFile, replace_js_1.replace.syncNoFile, replace_js_1.replace.asyncNoFile, (opt, entries = []) => {
-    replace_js_1.replace.validate?.(opt, entries);
+export const update = makeCommand(r.syncFile, r.asyncFile, r.syncNoFile, r.asyncNoFile, (opt, entries = []) => {
+    r.validate?.(opt, entries);
     mtimeFilter(opt);
 });
 const mtimeFilter = (opt) => {
