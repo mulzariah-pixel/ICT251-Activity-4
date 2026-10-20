@@ -1,169 +1,392 @@
-'use strict'
+var chownr = require('chownr')
+var tar = require('tar-stream')
+var pump = require('pump')
+var mkdirp = require('mkdirp-classic')
+var fs = require('fs')
+var path = require('path')
+var os = require('os')
 
-const Client = require('./lib/dispatcher/client')
-const Dispatcher = require('./lib/dispatcher/dispatcher')
-const Pool = require('./lib/dispatcher/pool')
-const BalancedPool = require('./lib/dispatcher/balanced-pool')
-const Agent = require('./lib/dispatcher/agent')
-const ProxyAgent = require('./lib/dispatcher/proxy-agent')
-const EnvHttpProxyAgent = require('./lib/dispatcher/env-http-proxy-agent')
-const RetryAgent = require('./lib/dispatcher/retry-agent')
-const errors = require('./lib/core/errors')
-const util = require('./lib/core/util')
-const { InvalidArgumentError } = errors
-const api = require('./lib/api')
-const buildConnector = require('./lib/core/connect')
-const MockClient = require('./lib/mock/mock-client')
-const MockAgent = require('./lib/mock/mock-agent')
-const MockPool = require('./lib/mock/mock-pool')
-const mockErrors = require('./lib/mock/mock-errors')
-const RetryHandler = require('./lib/handler/retry-handler')
-const { getGlobalDispatcher, setGlobalDispatcher } = require('./lib/global')
-const DecoratorHandler = require('./lib/handler/decorator-handler')
-const RedirectHandler = require('./lib/handler/redirect-handler')
-const createRedirectInterceptor = require('./lib/interceptor/redirect-interceptor')
+var win32 = os.platform() === 'win32'
 
-Object.assign(Dispatcher.prototype, api)
+var noop = function () {}
 
-module.exports.Dispatcher = Dispatcher
-module.exports.Client = Client
-module.exports.Pool = Pool
-module.exports.BalancedPool = BalancedPool
-module.exports.Agent = Agent
-module.exports.ProxyAgent = ProxyAgent
-module.exports.EnvHttpProxyAgent = EnvHttpProxyAgent
-module.exports.RetryAgent = RetryAgent
-module.exports.RetryHandler = RetryHandler
-
-module.exports.DecoratorHandler = DecoratorHandler
-module.exports.RedirectHandler = RedirectHandler
-module.exports.createRedirectInterceptor = createRedirectInterceptor
-module.exports.interceptors = {
-  redirect: require('./lib/interceptor/redirect'),
-  retry: require('./lib/interceptor/retry'),
-  dump: require('./lib/interceptor/dump'),
-  dns: require('./lib/interceptor/dns')
+var echo = function (name) {
+  return name
 }
 
-module.exports.buildConnector = buildConnector
-module.exports.errors = errors
-module.exports.util = {
-  parseHeaders: util.parseHeaders,
-  headerNameToString: util.headerNameToString
+var normalize = !win32 ? echo : function (name) {
+  return name.replace(/\\/g, '/').replace(/[:?<>|]/g, '_')
 }
 
-function makeDispatcher (fn) {
-  return (url, opts, handler) => {
-    if (typeof opts === 'function') {
-      handler = opts
-      opts = null
+var statAll = function (fs, stat, cwd, ignore, entries, sort) {
+  var queue = entries || ['.']
+
+  for (var i = 0; i < queue.length; i++) { // do not pack entries outside cwd
+    if (!inCwd(path.resolve(cwd, queue[i]), cwd)) throw new Error(queue[i] + ' is not a valid path')
+  }
+
+  return function loop (callback) {
+    if (!queue.length) return callback()
+    var next = queue.shift()
+    var nextAbs = path.join(cwd, next)
+
+    stat.call(fs, nextAbs, function (err, stat) {
+      if (err) return callback(err)
+
+      if (!stat.isDirectory()) return callback(null, next, stat)
+
+      fs.readdir(nextAbs, function (err, files) {
+        if (err) return callback(err)
+
+        if (sort) files.sort()
+        for (var i = 0; i < files.length; i++) {
+          if (!ignore(path.join(cwd, next, files[i]))) queue.push(path.join(next, files[i]))
+        }
+
+        callback(null, next, stat)
+      })
+    })
+  }
+}
+
+var strip = function (map, level) {
+  return function (header) {
+    header.name = header.name.split('/').slice(level).join('/')
+
+    var linkname = header.linkname
+    if (linkname && (header.type === 'link' || path.isAbsolute(linkname))) {
+      header.linkname = linkname.split('/').slice(level).join('/')
     }
 
-    if (!url || (typeof url !== 'string' && typeof url !== 'object' && !(url instanceof URL))) {
-      throw new InvalidArgumentError('invalid url')
+    return map(header)
+  }
+}
+
+exports.pack = function (cwd, opts) {
+  if (!cwd) cwd = '.'
+  if (!opts) opts = {}
+
+  var xfs = opts.fs || fs
+  var ignore = opts.ignore || opts.filter || noop
+  var map = opts.map || noop
+  var mapStream = opts.mapStream || echo
+  var statNext = statAll(xfs, opts.dereference ? xfs.stat : xfs.lstat, cwd, ignore, opts.entries, opts.sort)
+  var strict = opts.strict !== false
+  var umask = typeof opts.umask === 'number' ? ~opts.umask : ~processUmask()
+  var dmode = typeof opts.dmode === 'number' ? opts.dmode : 0
+  var fmode = typeof opts.fmode === 'number' ? opts.fmode : 0
+  var pack = opts.pack || tar.pack()
+  var finish = opts.finish || noop
+
+  if (opts.strip) map = strip(map, opts.strip)
+
+  if (opts.readable) {
+    dmode |= parseInt(555, 8)
+    fmode |= parseInt(444, 8)
+  }
+  if (opts.writable) {
+    dmode |= parseInt(333, 8)
+    fmode |= parseInt(222, 8)
+  }
+
+  var onsymlink = function (filename, header) {
+    xfs.readlink(path.join(cwd, filename), function (err, linkname) {
+      if (err) return pack.destroy(err)
+      header.linkname = normalize(linkname)
+      pack.entry(header, onnextentry)
+    })
+  }
+
+  var onstat = function (err, filename, stat) {
+    if (err) return pack.destroy(err)
+    if (!filename) {
+      if (opts.finalize !== false) pack.finalize()
+      return finish(pack)
     }
 
-    if (opts != null && typeof opts !== 'object') {
-      throw new InvalidArgumentError('invalid opts')
+    if (stat.isSocket()) return onnextentry() // tar does not support sockets...
+
+    var header = {
+      name: normalize(filename),
+      mode: (stat.mode | (stat.isDirectory() ? dmode : fmode)) & umask,
+      mtime: stat.mtime,
+      size: stat.size,
+      type: 'file',
+      uid: stat.uid,
+      gid: stat.gid
     }
 
-    if (opts && opts.path != null) {
-      if (typeof opts.path !== 'string') {
-        throw new InvalidArgumentError('invalid opts.path')
+    if (stat.isDirectory()) {
+      header.size = 0
+      header.type = 'directory'
+      header = map(header) || header
+      return pack.entry(header, onnextentry)
+    }
+
+    if (stat.isSymbolicLink()) {
+      header.size = 0
+      header.type = 'symlink'
+      header = map(header) || header
+      return onsymlink(filename, header)
+    }
+
+    // TODO: add fifo etc...
+
+    header = map(header) || header
+
+    if (!stat.isFile()) {
+      if (strict) return pack.destroy(new Error('unsupported type for ' + filename))
+      return onnextentry()
+    }
+
+    var entry = pack.entry(header, onnextentry)
+    if (!entry) return
+
+    var rs = mapStream(xfs.createReadStream(path.join(cwd, filename), { start: 0, end: header.size > 0 ? header.size - 1 : header.size }), header)
+
+    rs.on('error', function (err) { // always forward errors on destroy
+      entry.destroy(err)
+    })
+
+    pump(rs, entry)
+  }
+
+  var onnextentry = function (err) {
+    if (err) return pack.destroy(err)
+    statNext(onstat)
+  }
+
+  onnextentry()
+
+  return pack
+}
+
+var head = function (list) {
+  return list.length ? list[list.length - 1] : null
+}
+
+var processGetuid = function () {
+  return process.getuid ? process.getuid() : -1
+}
+
+var processUmask = function () {
+  return process.umask ? process.umask() : 0
+}
+
+exports.extract = function (cwd, opts) {
+  if (!cwd) cwd = '.'
+  if (!opts) opts = {}
+
+  var xfs = opts.fs || fs
+  var ignore = opts.ignore || opts.filter || noop
+  var map = opts.map || noop
+  var mapStream = opts.mapStream || echo
+  var own = opts.chown !== false && !win32 && processGetuid() === 0
+  var extract = opts.extract || tar.extract()
+  var stack = []
+  var now = new Date()
+  var umask = typeof opts.umask === 'number' ? ~opts.umask : ~processUmask()
+  var dmode = typeof opts.dmode === 'number' ? opts.dmode : 0
+  var fmode = typeof opts.fmode === 'number' ? opts.fmode : 0
+  var strict = opts.strict !== false
+
+  if (opts.strip) map = strip(map, opts.strip)
+
+  if (opts.readable) {
+    dmode |= parseInt(555, 8)
+    fmode |= parseInt(444, 8)
+  }
+  if (opts.writable) {
+    dmode |= parseInt(333, 8)
+    fmode |= parseInt(222, 8)
+  }
+
+  var utimesParent = function (name, cb) { // we just set the mtime on the parent dir again everytime we write an entry
+    var top
+    while ((top = head(stack)) && name.slice(0, top[0].length) !== top[0]) stack.pop()
+    if (!top) return cb()
+    xfs.utimes(top[0], now, top[1], cb)
+  }
+
+  var utimes = function (name, header, cb) {
+    if (opts.utimes === false) return cb()
+
+    if (header.type === 'directory') return xfs.utimes(name, now, header.mtime, cb)
+    if (header.type === 'symlink') return utimesParent(name, cb) // TODO: how to set mtime on link?
+
+    xfs.utimes(name, now, header.mtime, function (err) {
+      if (err) return cb(err)
+      utimesParent(name, cb)
+    })
+  }
+
+  var chperm = function (name, header, cb) {
+    var link = header.type === 'symlink'
+
+    /* eslint-disable node/no-deprecated-api */
+    var chmod = link ? xfs.lchmod : xfs.chmod
+    var chown = link ? xfs.lchown : xfs.chown
+    /* eslint-enable node/no-deprecated-api */
+
+    if (!chmod) return cb()
+
+    var mode = (header.mode | (header.type === 'directory' ? dmode : fmode)) & umask & parseInt(777, 8) // never extract setuid/setgid/sticky bits
+
+    if (chown && own) chown.call(xfs, name, header.uid, header.gid, onchown)
+    else onchown(null)
+
+    function onchown (err) {
+      if (err) return cb(err)
+      if (!chmod) return cb()
+      chmod.call(xfs, name, mode, cb)
+    }
+  }
+
+  extract.on('entry', function (header, stream, next) {
+    header = map(header) || header
+    header.name = normalize(header.name)
+    var name = path.join(cwd, path.join('/', header.name))
+
+    if (ignore(name, header)) {
+      stream.resume()
+      return next()
+    }
+
+    var stat = function (err) {
+      if (err) return next(err)
+      if (path.join(name, '.') === path.join(cwd, '.')) return next() // do not touch the extraction root itself
+      utimes(name, header, function (err) {
+        if (err) return next(err)
+        if (win32) return next()
+        chperm(name, header, next)
+      })
+    }
+
+    var onsymlink = function () {
+      if (win32) return next() // skip symlinks on win for now before it can be tested
+      xfs.unlink(name, function () {
+        var dst = path.resolve(path.dirname(name), header.linkname)
+        if (!inCwd(dst, cwd)) return next(new Error(name + ' is not a valid symlink'))
+
+        validateNotSymlink(xfs, dst, path.resolve(cwd), function (err, valid) {
+          if (err) return next(err)
+          if (!valid) return next(new Error(name + ' is not a valid symlink'))
+          xfs.symlink(header.linkname, name, stat)
+        })
+      })
+    }
+
+    var onlink = function () {
+      if (win32) return next() // skip links on win for now before it can be tested
+      xfs.unlink(name, function () {
+        var srcpath = path.join(cwd, path.join('/', header.linkname))
+
+        xfs.realpath(srcpath, function (err, dst) {
+          if (err || !inCwd(dst, cwd)) return next(new Error(name + ' is not a valid hardlink'))
+
+          xfs.link(dst, name, function (err) {
+            if (err && err.code === 'EPERM' && opts.hardlinkAsFilesFallback) {
+              stream = xfs.createReadStream(srcpath)
+              return onfile()
+            }
+
+            stat(err)
+          })
+        })
+      })
+    }
+
+    var onfile = function () {
+      xfs.lstat(name, function (err, st) {
+        if (!err && st.isSymbolicLink()) return xfs.unlink(name, onwrite) // never write through an existing symlink
+        onwrite()
+      })
+
+      function onwrite (err) {
+        if (err) return next(err)
+
+        var ws = xfs.createWriteStream(name)
+        var rs = mapStream(stream, header)
+
+        ws.on('error', function (err) { // always forward errors on destroy
+          rs.destroy(err)
+        })
+
+        pump(rs, ws, function (err) {
+          if (err) return next(err)
+          ws.on('close', stat)
+        })
       }
+    }
 
-      let path = opts.path
-      if (!opts.path.startsWith('/')) {
-        path = `/${path}`
-      }
+    if (header.type === 'directory') {
+      stack.push([name, header.mtime])
+      return mkdirfix(name, {
+        fs: xfs, own: own, uid: header.uid, gid: header.gid
+      }, stat)
+    }
 
-      url = new URL(util.parseOrigin(url).origin + path)
+    var dir = path.dirname(name)
+
+    validate(xfs, dir, path.join(cwd, '.'), function (err, valid) {
+      if (err) return next(err)
+      if (!valid) return next(new Error(dir + ' is not a valid path'))
+
+      mkdirfix(dir, {
+        fs: xfs, own: own, uid: header.uid, gid: header.gid
+      }, function (err) {
+        if (err) return next(err)
+
+        switch (header.type) {
+          case 'file': return onfile()
+          case 'link': return onlink()
+          case 'symlink': return onsymlink()
+        }
+
+        if (strict) return next(new Error('unsupported type for ' + name + ' (' + header.type + ')'))
+
+        stream.resume()
+        next()
+      })
+    })
+  })
+
+  if (opts.finish) extract.on('finish', opts.finish)
+
+  return extract
+}
+
+function validate (fs, name, root, cb) {
+  if (name === root) return cb(null, true)
+  fs.lstat(name, function (err, st) {
+    if (err && err.code !== 'ENOENT') return cb(err)
+    if (err || st.isDirectory()) return validate(fs, path.join(name, '..'), root, cb)
+    cb(null, false)
+  })
+}
+
+function validateNotSymlink (fs, name, root, cb) {
+  if (name === root) return cb(null, true)
+  if (!name.startsWith(root + path.sep)) return cb(null, false)
+
+  fs.lstat(name, function (err, st) {
+    if (err && err.code !== 'ENOENT' && err.code !== 'EPERM') return cb(err)
+    if (err || !st.isSymbolicLink()) return validateNotSymlink(fs, path.join(name, '..'), root, cb)
+    cb(null, false)
+  })
+}
+
+function mkdirfix (name, opts, cb) {
+  mkdirp(name, { fs: opts.fs }, function (err, made) {
+    if (!err && made && opts.own) {
+      chownr(made, opts.uid, opts.gid, cb)
     } else {
-      if (!opts) {
-        opts = typeof url === 'object' ? url : {}
-      }
-
-      url = util.parseURL(url)
+      cb(err)
     }
-
-    const { agent, dispatcher = getGlobalDispatcher() } = opts
-
-    if (agent) {
-      throw new InvalidArgumentError('unsupported opts.agent. Did you mean opts.client?')
-    }
-
-    return fn.call(dispatcher, {
-      ...opts,
-      origin: url.origin,
-      path: url.search ? `${url.pathname}${url.search}` : url.pathname,
-      method: opts.method || (opts.body ? 'PUT' : 'GET')
-    }, handler)
-  }
+  })
 }
 
-module.exports.setGlobalDispatcher = setGlobalDispatcher
-module.exports.getGlobalDispatcher = getGlobalDispatcher
-
-const fetchImpl = require('./lib/web/fetch').fetch
-module.exports.fetch = async function fetch (init, options = undefined) {
-  try {
-    return await fetchImpl(init, options)
-  } catch (err) {
-    if (err && typeof err === 'object') {
-      Error.captureStackTrace(err)
-    }
-
-    throw err
-  }
+function inCwd (dst, cwd) {
+  cwd = path.resolve(cwd)
+  return cwd === dst || dst.startsWith(cwd + path.sep)
 }
-module.exports.Headers = require('./lib/web/fetch/headers').Headers
-module.exports.Response = require('./lib/web/fetch/response').Response
-module.exports.Request = require('./lib/web/fetch/request').Request
-module.exports.FormData = require('./lib/web/fetch/formdata').FormData
-module.exports.File = globalThis.File ?? require('node:buffer').File
-module.exports.FileReader = require('./lib/web/fileapi/filereader').FileReader
-
-const { setGlobalOrigin, getGlobalOrigin } = require('./lib/web/fetch/global')
-
-module.exports.setGlobalOrigin = setGlobalOrigin
-module.exports.getGlobalOrigin = getGlobalOrigin
-
-const { CacheStorage } = require('./lib/web/cache/cachestorage')
-const { kConstruct } = require('./lib/web/cache/symbols')
-
-// Cache & CacheStorage are tightly coupled with fetch. Even if it may run
-// in an older version of Node, it doesn't have any use without fetch.
-module.exports.caches = new CacheStorage(kConstruct)
-
-const { deleteCookie, getCookies, getSetCookies, setCookie } = require('./lib/web/cookies')
-
-module.exports.deleteCookie = deleteCookie
-module.exports.getCookies = getCookies
-module.exports.getSetCookies = getSetCookies
-module.exports.setCookie = setCookie
-
-const { parseMIMEType, serializeAMimeType } = require('./lib/web/fetch/data-url')
-
-module.exports.parseMIMEType = parseMIMEType
-module.exports.serializeAMimeType = serializeAMimeType
-
-const { CloseEvent, ErrorEvent, MessageEvent } = require('./lib/web/websocket/events')
-module.exports.WebSocket = require('./lib/web/websocket/websocket').WebSocket
-module.exports.CloseEvent = CloseEvent
-module.exports.ErrorEvent = ErrorEvent
-module.exports.MessageEvent = MessageEvent
-
-module.exports.request = makeDispatcher(api.request)
-module.exports.stream = makeDispatcher(api.stream)
-module.exports.pipeline = makeDispatcher(api.pipeline)
-module.exports.connect = makeDispatcher(api.connect)
-module.exports.upgrade = makeDispatcher(api.upgrade)
-
-module.exports.MockClient = MockClient
-module.exports.MockPool = MockPool
-module.exports.MockAgent = MockAgent
-module.exports.mockErrors = mockErrors
-
-const { EventSource } = require('./lib/web/eventsource/eventsource')
-
-module.exports.EventSource = EventSource
